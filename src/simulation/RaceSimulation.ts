@@ -124,13 +124,9 @@ export class RaceSimulation {
   }
 
   private getMaxInitialDpr(): number {
-    if (typeof window === 'undefined') return 1;
-    const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
-    const isAndroidWebView = /\bwv\b|Android.*Version\/[\d.]+|WebToApp/i.test(ua);
-    if (isAndroidWebView) return 1.0;
-    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    if (typeof window === 'undefined') return 2;
     const rawDpr = window.devicePixelRatio || 1;
-    return isMobile ? Math.min(rawDpr, 1.25) : Math.min(rawDpr, 1.75);
+    return Math.max(1.75, Math.min(rawDpr, 2.25));
   }
 
   attachCanvas(canvas: HTMLCanvasElement): void {
@@ -159,8 +155,14 @@ export class RaceSimulation {
     if (!this.canvas) return;
     const cssW = this.containerCssWidth > 0 ? this.containerCssWidth : this.virtualWidth;
     const cssH = this.containerCssHeight > 0 ? this.containerCssHeight : this.virtualHeight;
-    const targetWidth = Math.max(300, Math.round(cssW * this.adaptiveDprScale));
-    const targetHeight = Math.max(300, Math.round(cssH * this.adaptiveDprScale));
+    const targetWidth = Math.max(
+      Math.round(this.virtualWidth * 1.5),
+      Math.round(cssW * this.adaptiveDprScale)
+    );
+    const targetHeight = Math.max(
+      Math.round(this.virtualHeight * 1.5),
+      Math.round(cssH * this.adaptiveDprScale)
+    );
     if (this.canvas.width !== targetWidth || this.canvas.height !== targetHeight) {
       this.canvas.width = targetWidth;
       this.canvas.height = targetHeight;
@@ -175,23 +177,23 @@ export class RaceSimulation {
       const deltaMs = timestamp - this.lastTimestamp;
       this.lastTimestamp = timestamp;
 
-      // Automatic Adaptive HiDPI Scaling: monitor frame time when active
+      // Automatic Adaptive HiDPI Scaling: preserves crispness (never drops below 1.5x)
       if (!this.paused && deltaMs > 0 && deltaMs < 150) {
         this.smoothedFrameMs = this.smoothedFrameMs * 0.85 + deltaMs * 0.15;
 
-        if (this.smoothedFrameMs > 18.5 && this.adaptiveDprScale > 0.75) {
+        if (this.smoothedFrameMs > 22.0 && this.adaptiveDprScale > 1.5) {
           this.slowFrameStreak++;
           this.fastFrameStreak = 0;
-          if (this.slowFrameStreak >= 12) {
-            this.adaptiveDprScale = Math.max(0.75, Math.round((this.adaptiveDprScale - 0.15) * 100) / 100);
+          if (this.slowFrameStreak >= 18) {
+            this.adaptiveDprScale = Math.max(1.5, Math.round((this.adaptiveDprScale - 0.2) * 100) / 100);
             this.slowFrameStreak = 0;
             this.syncCanvasBufferResolution();
           }
-        } else if (this.smoothedFrameMs < 14.0 && this.adaptiveDprScale < maxDpr) {
+        } else if (this.smoothedFrameMs < 15.0 && this.adaptiveDprScale < maxDpr) {
           this.fastFrameStreak++;
           this.slowFrameStreak = Math.max(0, this.slowFrameStreak - 1);
-          if (this.fastFrameStreak >= 120) {
-            this.adaptiveDprScale = Math.min(maxDpr, Math.round((this.adaptiveDprScale + 0.15) * 100) / 100);
+          if (this.fastFrameStreak >= 90) {
+            this.adaptiveDprScale = Math.min(maxDpr, Math.round((this.adaptiveDprScale + 0.2) * 100) / 100);
             this.fastFrameStreak = 0;
             this.syncCanvasBufferResolution();
           }

@@ -54,16 +54,10 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
   const [resetKey, setResetKey] = useState(0);
 
   const layout = simulation.layoutConfig || DEFAULT_LAYOUT_CONFIG;
-  const [aspectRatio, setAspectRatio] = useState<ViewportAspectRatio>(
-    layout.aspectRatio || '4:3'
-  );
+  const aspectRatio: ViewportAspectRatio = layout.aspectRatio || '4:3';
 
   const stageRef = useRef<HTMLDivElement | null>(null);
   const [stageSize, setStageSize] = useState<{ w: number; h: number }>({ w: 800, h: 600 });
-
-  useEffect(() => {
-    setAspectRatio(simulation.layoutConfig?.aspectRatio || '4:3');
-  }, [simulation]);
 
   useEffect(() => {
     if (!stageRef.current) return;
@@ -117,16 +111,6 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
     simulation.loadRace(simulation.currentMapKey, simulation.currentMap);
   };
 
-  const handleSelectAspect = (ratio: ViewportAspectRatio) => {
-    setAspectRatio(ratio);
-    if (simulation.layoutConfig) {
-      simulation.layoutConfig.aspectRatio = ratio;
-    }
-    if (simulation.currentMap.layoutConfig) {
-      simulation.currentMap.layoutConfig.aspectRatio = ratio;
-    }
-  };
-
   const themeBgClass =
     layout.arenaTheme === 'midnight'
       ? 'bg-[#1e293b]'
@@ -145,10 +129,32 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
       ? 'p-2.5 sm:p-4'
       : 'p-1.5 sm:p-2.5';
 
-  // Compute exact fitted dimensions for the arena canvas when aspectRatio is 1:1, 16:9, or 4:3
+  const vScale = Math.max(0.25, (layout.viewportScale ?? 100) / 100);
+  const vOffsetX = layout.viewportOffsetX ?? 0;
+  const vOffsetY = layout.viewportOffsetY ?? 0;
+
+  const titleScale = Math.max(0.25, (layout.titleScale ?? 100) / 100);
+  const titleOffsetX = layout.titleOffsetX ?? 0;
+  const titleOffsetY = layout.titleOffsetY ?? 0;
+
+  const timerScale = Math.max(0.25, (layout.timerScale ?? 100) / 100);
+  const timerOffsetX = layout.timerOffsetX ?? 0;
+  const timerOffsetY = layout.timerOffsetY ?? 0;
+
+  const racersListScale = Math.max(0.25, (layout.racersListScale ?? 100) / 100);
+  const racersListOffsetX = layout.racersListOffsetX ?? 0;
+  const racersListOffsetY = layout.racersListOffsetY ?? 0;
+
+  // Compute exact fitted dimensions for the arena canvas (incorporating viewportScale natively so canvas stays HiDPI-sharp)
   const fittedCanvasBox = (() => {
-    if (aspectRatio === 'auto' || stageSize.w <= 0 || stageSize.h <= 0) {
+    if (stageSize.w <= 0 || stageSize.h <= 0) {
       return null;
+    }
+    if (aspectRatio === 'auto') {
+      return {
+        width: Math.max(120, Math.round(stageSize.w * vScale)),
+        height: Math.max(100, Math.round(stageSize.h * vScale)),
+      };
     }
     const targetRatio =
       aspectRatio === '1:1' ? 1.0 : aspectRatio === '16:9' ? 16 / 9 : 4 / 3;
@@ -160,7 +166,10 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
       h = availH;
       w = Math.round(h * targetRatio);
     }
-    return { width: Math.max(160, w), height: Math.max(120, h) };
+    return {
+      width: Math.max(120, Math.round(w * vScale)),
+      height: Math.max(100, Math.round(h * vScale)),
+    };
   })();
 
   const showHeaderRow = layout.showTitle !== false || layout.showTimer !== false;
@@ -171,12 +180,31 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
 
   const timerNode =
     layout.showTimer !== false ? (
-      <RaceTimer simulation={simulation} resetKey={resetKey} />
+      <div
+        style={{
+          transform: `translate(${timerOffsetX}px, ${timerOffsetY}px) scale(${timerScale})`,
+          transformOrigin: layout.timerPosition === 'right' ? 'right center' : 'left center',
+        }}
+        className="shrink-0 z-20"
+      >
+        <RaceTimer simulation={simulation} resetKey={resetKey} />
+      </div>
     ) : null;
 
   const titleNode =
     layout.showTitle !== false ? (
-      <div className="flex items-center gap-1.5 bg-amber-100 paper-card px-3 py-0.5 sm:py-1 min-w-0">
+      <div
+        style={{
+          transform: `translate(${titleOffsetX}px, ${titleOffsetY}px) scale(${titleScale})`,
+          transformOrigin:
+            layout.titlePosition === 'left'
+              ? 'left center'
+              : layout.titlePosition === 'right'
+              ? 'right center'
+              : 'center center',
+        }}
+        className="flex items-center gap-1.5 bg-amber-100 paper-card px-3 py-0.5 sm:py-1 min-w-0 z-20"
+      >
         <div className="w-3.5 h-3.5 sm:w-4 sm:h-4 bg-red-500 border-2 border-slate-900 rounded-sm relative flex items-center justify-center shrink-0">
           <div className="flex gap-0.5">
             <div className="w-1 h-1 bg-white border border-black"></div>
@@ -189,29 +217,6 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
       </div>
     ) : null;
 
-  const aspectSelectorNode = (
-    <div className="flex items-center gap-0.5 bg-white border-2 border-slate-900 rounded-lg p-0.5 shadow-[1.5px_2px_0px_#0f172a] shrink-0">
-      {(['1:1', '16:9', '4:3', 'auto'] as ViewportAspectRatio[]).map(ratio => {
-        const active = aspectRatio === ratio;
-        return (
-          <button
-            key={ratio}
-            type="button"
-            onClick={() => handleSelectAspect(ratio)}
-            className={`px-1.5 py-0.5 rounded text-[9px] sm:text-[10px] font-black uppercase cursor-pointer ${
-              active
-                ? 'bg-amber-300 text-slate-950 border border-slate-900'
-                : 'text-slate-600 hover:bg-slate-100'
-            }`}
-            title={`Set Arena Viewport Aspect Ratio to ${ratio === 'auto' ? 'Full Auto' : ratio}`}
-          >
-            {ratio === 'auto' ? 'Full' : ratio}
-          </button>
-        );
-      })}
-    </div>
-  );
-
   return (
     <div className="flex flex-col items-center justify-center h-dvh w-screen overflow-hidden relative select-none p-1.5 sm:p-2.5">
       {/* Main Center Stage: Dynamic Arena Frame */}
@@ -220,8 +225,8 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
           id="gameFrame"
           className={`relative w-full h-full flex flex-col items-center justify-between ${themeBgClass} border-[3px] border-slate-900 rounded-xl shadow-[3px_4px_0px_#0f172a] ${framePaddingClass} overflow-hidden`}
         >
-          {/* Top Header Row: Configurable Timer, Title & Viewport Aspect Ratio Switcher */}
-          {showHeaderRow ? (
+          {/* Top Header Row: Configurable Timer & Title */}
+          {showHeaderRow && (
             <div className="w-full relative flex items-center justify-between gap-1.5 mb-1.5 z-20 min-h-[28px] sm:min-h-[32px] shrink-0">
               {/* Left Slot */}
               <div className="flex items-center gap-1.5 min-w-0">
@@ -238,26 +243,29 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
               <div className="flex items-center justify-end gap-1.5 shrink-0">
                 {layout.titlePosition === 'right' && titleNode}
                 {layout.timerPosition === 'right' && timerNode}
-                {aspectSelectorNode}
               </div>
-            </div>
-          ) : (
-            <div className="w-full flex items-center justify-end mb-1 z-20 shrink-0">
-              {aspectSelectorNode}
             </div>
           )}
 
           {/* Optional Top Racers List (when configured to 'top') */}
           {layout.showRacersList !== false && layout.racersListPosition === 'top' && (
-            <LeaderboardBar
-              stats={stats}
-              styleMode={layout.racersListStyle || 'detailed'}
-              columnsMode={layout.racersListColumns || 'auto'}
-              position="top"
-            />
+            <div
+              style={{
+                transform: `translate(${racersListOffsetX}px, ${racersListOffsetY}px) scale(${racersListScale})`,
+                transformOrigin: 'top center',
+              }}
+              className="w-full shrink-0 z-20"
+            >
+              <LeaderboardBar
+                stats={stats}
+                styleMode={layout.racersListStyle || 'detailed'}
+                columnsMode={layout.racersListColumns || 'auto'}
+                position="top"
+              />
+            </div>
           )}
 
-          {/* Dynamic Arena Stage: Fits chosen Aspect Ratio (1:1, 16:9, 4:3, or Full Auto) */}
+          {/* Dynamic Arena Stage: Fits chosen Aspect Ratio, Size (%), and Offset Position (X, Y) */}
           <div
             ref={stageRef}
             className="relative flex-1 w-full h-full min-h-0 flex items-center justify-center overflow-hidden"
@@ -266,8 +274,12 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
               style={{
                 width: fittedCanvasBox ? `${fittedCanvasBox.width}px` : '100%',
                 height: fittedCanvasBox ? `${fittedCanvasBox.height}px` : '100%',
+                transform:
+                  vOffsetX !== 0 || vOffsetY !== 0
+                    ? `translate(${vOffsetX}px, ${vOffsetY}px)`
+                    : undefined,
               }}
-              className="relative flex flex-col items-center justify-center rounded-lg overflow-hidden"
+              className="relative flex flex-col items-center justify-center rounded-lg overflow-hidden shrink-0"
             >
               <GameCanvas simulation={simulation} />
             </div>
@@ -275,12 +287,20 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
 
           {/* Default Bottom Racers List (when configured to 'bottom') */}
           {layout.showRacersList !== false && layout.racersListPosition !== 'top' && (
-            <LeaderboardBar
-              stats={stats}
-              styleMode={layout.racersListStyle || 'detailed'}
-              columnsMode={layout.racersListColumns || 'auto'}
-              position="bottom"
-            />
+            <div
+              style={{
+                transform: `translate(${racersListOffsetX}px, ${racersListOffsetY}px) scale(${racersListScale})`,
+                transformOrigin: 'bottom center',
+              }}
+              className="w-full shrink-0 z-20"
+            >
+              <LeaderboardBar
+                stats={stats}
+                styleMode={layout.racersListStyle || 'detailed'}
+                columnsMode={layout.racersListColumns || 'auto'}
+                position="bottom"
+              />
+            </div>
           )}
         </div>
       </main>

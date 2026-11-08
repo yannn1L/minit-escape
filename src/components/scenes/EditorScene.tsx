@@ -1830,7 +1830,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
               <svg
                 ref={svgRef}
                 viewBox={dynamicViewBox}
-                shapeRendering="optimizeSpeed"
+                shapeRendering="geometricPrecision"
+                textRendering="geometricPrecision"
                 className={`w-full h-full block select-none touch-none ${
                   editorMode === 'select' ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'
                 }`}
@@ -2942,42 +2943,76 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                     <div className="flex items-center justify-between text-[9px] font-black uppercase tracking-wider text-slate-400">
                       <span>Live Layout Preview</span>
                       <span className="text-violet-300">
-                        Ratio: {layoutConfig.aspectRatio === 'auto' ? 'Full Screen' : layoutConfig.aspectRatio}
+                        Ratio: {layoutConfig.aspectRatio === 'auto' ? 'Full' : layoutConfig.aspectRatio} · {layoutConfig.viewportScale ?? 100}%
                       </span>
                     </div>
-                    <div className="bg-amber-50/95 text-slate-900 rounded border border-slate-700 p-1.5 space-y-1">
+                    <div className="bg-amber-50/95 text-slate-900 rounded border border-slate-700 p-1.5 space-y-1 overflow-hidden">
                       {/* Preview Top Header */}
-                      <div className="flex items-center justify-between bg-white border border-slate-300 rounded px-1.5 py-0.5 text-[8px] font-black">
+                      <div className="flex items-center justify-between bg-white border border-slate-300 rounded px-1.5 py-0.5 text-[8px] font-black overflow-hidden">
                         <div className="flex items-center gap-1">
                           {layoutConfig.showTitle && layoutConfig.titlePosition === 'left' && (
-                            <span className="bg-amber-300 px-1 rounded border border-slate-800 truncate max-w-[85px]">
+                            <span
+                              style={{
+                                transform: `translate(${Math.round((layoutConfig.titleOffsetX ?? 0) * 0.15)}px, ${Math.round((layoutConfig.titleOffsetY ?? 0) * 0.15)}px) scale(${(layoutConfig.titleScale ?? 100) / 100})`,
+                              }}
+                              className="bg-amber-300 px-1 rounded border border-slate-800 truncate max-w-[85px] inline-block"
+                            >
                               {layoutConfig.customTitle?.trim() || mapName || 'TITLE'}
                             </span>
                           )}
                           {layoutConfig.showTimer && layoutConfig.timerPosition === 'left' && (
-                            <span className="bg-slate-800 text-white px-1 rounded font-mono">⏱ 00:12.4</span>
+                            <span
+                              style={{
+                                transform: `translate(${Math.round((layoutConfig.timerOffsetX ?? 0) * 0.15)}px, ${Math.round((layoutConfig.timerOffsetY ?? 0) * 0.15)}px) scale(${(layoutConfig.timerScale ?? 100) / 100})`,
+                              }}
+                              className="bg-slate-800 text-white px-1 rounded font-mono inline-block"
+                            >
+                              ⏱ 00:12
+                            </span>
                           )}
                         </div>
                         {layoutConfig.showTitle && layoutConfig.titlePosition === 'center' && (
-                          <span className="bg-amber-300 px-1 rounded border border-slate-800 truncate max-w-[95px]">
+                          <span
+                            style={{
+                              transform: `translate(${Math.round((layoutConfig.titleOffsetX ?? 0) * 0.15)}px, ${Math.round((layoutConfig.titleOffsetY ?? 0) * 0.15)}px) scale(${(layoutConfig.titleScale ?? 100) / 100})`,
+                            }}
+                            className="bg-amber-300 px-1 rounded border border-slate-800 truncate max-w-[95px] inline-block"
+                          >
                             {layoutConfig.customTitle?.trim() || mapName || 'TITLE'}
                           </span>
                         )}
                         <div className="flex items-center gap-1">
                           {layoutConfig.showTitle && layoutConfig.titlePosition === 'right' && (
-                            <span className="bg-amber-300 px-1 rounded border border-slate-800 truncate max-w-[85px]">
+                            <span
+                              style={{
+                                transform: `translate(${Math.round((layoutConfig.titleOffsetX ?? 0) * 0.15)}px, ${Math.round((layoutConfig.titleOffsetY ?? 0) * 0.15)}px) scale(${(layoutConfig.titleScale ?? 100) / 100})`,
+                              }}
+                              className="bg-amber-300 px-1 rounded border border-slate-800 truncate max-w-[85px] inline-block"
+                            >
                               {layoutConfig.customTitle?.trim() || mapName || 'TITLE'}
                             </span>
                           )}
                           {layoutConfig.showTimer && layoutConfig.timerPosition === 'right' && (
-                            <span className="bg-slate-800 text-white px-1 rounded font-mono">⏱ 00:12.4</span>
+                            <span
+                              style={{
+                                transform: `translate(${Math.round((layoutConfig.timerOffsetX ?? 0) * 0.15)}px, ${Math.round((layoutConfig.timerOffsetY ?? 0) * 0.15)}px) scale(${(layoutConfig.timerScale ?? 100) / 100})`,
+                              }}
+                              className="bg-slate-800 text-white px-1 rounded font-mono inline-block"
+                            >
+                              ⏱ 00:12
+                            </span>
                           )}
                         </div>
                       </div>
 
                       {/* Preview Racers List (Top) */}
                       {layoutConfig.showRacersList && layoutConfig.racersListPosition === 'top' && (
-                        <div className="grid grid-cols-4 gap-0.5 bg-white border border-slate-300 rounded p-0.5">
+                        <div
+                          style={{
+                            transform: `translate(${Math.round((layoutConfig.racersListOffsetX ?? 0) * 0.15)}px, ${Math.round((layoutConfig.racersListOffsetY ?? 0) * 0.15)}px) scale(${(layoutConfig.racersListScale ?? 100) / 100})`,
+                          }}
+                          className="grid grid-cols-4 gap-0.5 bg-white border border-slate-300 rounded p-0.5"
+                        >
                           {[0, 1, 2, 3].map((i) => (
                             <div key={i} className="h-2 rounded-xs bg-slate-200 flex items-center px-0.5 gap-0.5">
                               <span className="w-1.5 h-1.5 rounded-full bg-rose-500 inline-block" />
@@ -2988,7 +3023,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                       )}
 
                       {/* Preview Arena Box */}
-                      <div className="flex items-center justify-center py-1 bg-slate-200/70 rounded border border-dashed border-slate-400">
+                      <div className="flex items-center justify-center py-1 bg-slate-200/70 rounded border border-dashed border-slate-400 overflow-hidden">
                         <div
                           className={`rounded border-2 border-slate-900 flex items-center justify-center text-[8px] font-black text-white shadow-xs transition-all ${
                             layoutConfig.arenaTheme === 'midnight'
@@ -3002,15 +3037,18 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                               : 'bg-sky-500'
                           }`}
                           style={{
-                            width:
-                              layoutConfig.aspectRatio === '1:1'
+                            width: Math.round(
+                              (layoutConfig.aspectRatio === '1:1'
                                 ? 44
                                 : layoutConfig.aspectRatio === '4:3'
                                 ? 56
                                 : layoutConfig.aspectRatio === '16:9'
                                 ? 68
-                                : 84,
-                            height: 40,
+                                : 84) *
+                                ((layoutConfig.viewportScale ?? 100) / 100)
+                            ),
+                            height: Math.round(40 * ((layoutConfig.viewportScale ?? 100) / 100)),
+                            transform: `translate(${Math.round((layoutConfig.viewportOffsetX ?? 0) * 0.15)}px, ${Math.round((layoutConfig.viewportOffsetY ?? 0) * 0.15)}px)`,
                           }}
                         >
                           ARENA ({layoutConfig.aspectRatio === 'auto' ? 'FULL' : layoutConfig.aspectRatio})
@@ -3019,7 +3057,12 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
 
                       {/* Preview Racers List (Bottom) */}
                       {layoutConfig.showRacersList && layoutConfig.racersListPosition === 'bottom' && (
-                        <div className="grid grid-cols-4 gap-0.5 bg-white border border-slate-300 rounded p-0.5">
+                        <div
+                          style={{
+                            transform: `translate(${Math.round((layoutConfig.racersListOffsetX ?? 0) * 0.15)}px, ${Math.round((layoutConfig.racersListOffsetY ?? 0) * 0.15)}px) scale(${(layoutConfig.racersListScale ?? 100) / 100})`,
+                          }}
+                          className="grid grid-cols-4 gap-0.5 bg-white border border-slate-300 rounded p-0.5"
+                        >
                           {[0, 1, 2, 3].map((i) => (
                             <div key={i} className="h-2 rounded-xs bg-slate-200 flex items-center px-0.5 gap-0.5">
                               <span className="w-1.5 h-1.5 rounded-full bg-sky-500 inline-block" />
@@ -3031,19 +3074,16 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                     </div>
                   </div>
 
-                  {/* 1. Arena Viewport Aspect Ratio (Fixes long portrait viewport) */}
-                  <div className="paper-card bg-white p-2 border border-slate-300 space-y-1.5">
+                  {/* 1. Arena Viewport Aspect Ratio, Size & Offset */}
+                  <div className="paper-card bg-white p-2 border border-slate-300 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-black text-slate-800 uppercase">
-                        1. Arena Viewport Aspect Ratio
+                        1. Arena Viewport
                       </span>
                       <span className="text-[9px] font-bold text-violet-700 bg-violet-50 px-1.5 py-0.5 rounded border border-violet-200">
-                        Portrait & Landscape
+                        Ratio, Size & Offset
                       </span>
                     </div>
-                    <p className="text-[10px] text-slate-500 leading-tight">
-                      Choose a fixed frame ratio so portrait mode isn't too tall, or Full to stretch across the container.
-                    </p>
                     <div className="grid grid-cols-4 gap-1">
                       {([
                         { id: '1:1', label: '1:1', desc: 'Square' },
@@ -3074,9 +3114,39 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         );
                       })}
                     </div>
+
+                    <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-100">
+                      <NumberStepper
+                        label="Size"
+                        unit="%"
+                        value={layoutConfig.viewportScale ?? 100}
+                        min={40}
+                        max={160}
+                        step={5}
+                        onChange={(val) => setLayoutConfig(prev => ({ ...prev, viewportScale: val }))}
+                      />
+                      <NumberStepper
+                        label="Offset X"
+                        unit="px"
+                        value={layoutConfig.viewportOffsetX ?? 0}
+                        min={-400}
+                        max={400}
+                        step={4}
+                        onChange={(val) => setLayoutConfig(prev => ({ ...prev, viewportOffsetX: val }))}
+                      />
+                      <NumberStepper
+                        label="Offset Y"
+                        unit="px"
+                        value={layoutConfig.viewportOffsetY ?? 0}
+                        min={-400}
+                        max={400}
+                        step={4}
+                        onChange={(val) => setLayoutConfig(prev => ({ ...prev, viewportOffsetY: val }))}
+                      />
+                    </div>
                   </div>
 
-                  {/* 2. Title Configuration */}
+                  {/* 2. Title Configuration (Text, Alignment, Size & Offset) */}
                   <div className="paper-card bg-white p-2 border border-slate-300 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-black text-slate-800 uppercase">
@@ -3098,7 +3168,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                     </div>
 
                     {layoutConfig.showTitle && (
-                      <div className="space-y-1.5 pt-1 border-t border-slate-100">
+                      <div className="space-y-2 pt-1 border-t border-slate-100">
                         <div>
                           <label className="text-[10px] font-bold text-slate-600 block mb-0.5">
                             Custom Simulation Title (Leave empty to use Track Title)
@@ -3144,11 +3214,41 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                             ))}
                           </div>
                         </div>
+
+                        <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-100">
+                          <NumberStepper
+                            label="Size"
+                            unit="%"
+                            value={layoutConfig.titleScale ?? 100}
+                            min={50}
+                            max={220}
+                            step={5}
+                            onChange={(val) => setLayoutConfig(prev => ({ ...prev, titleScale: val }))}
+                          />
+                          <NumberStepper
+                            label="Offset X"
+                            unit="px"
+                            value={layoutConfig.titleOffsetX ?? 0}
+                            min={-400}
+                            max={400}
+                            step={4}
+                            onChange={(val) => setLayoutConfig(prev => ({ ...prev, titleOffsetX: val }))}
+                          />
+                          <NumberStepper
+                            label="Offset Y"
+                            unit="px"
+                            value={layoutConfig.titleOffsetY ?? 0}
+                            min={-400}
+                            max={400}
+                            step={4}
+                            onChange={(val) => setLayoutConfig(prev => ({ ...prev, titleOffsetY: val }))}
+                          />
+                        </div>
                       </div>
                     )}
                   </div>
 
-                  {/* 3. Live Race Timer Configuration */}
+                  {/* 3. Live Race Timer Configuration (Alignment, Size & Offset) */}
                   <div className="paper-card bg-white p-2 border border-slate-300 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-black text-slate-800 uppercase">
@@ -3170,28 +3270,60 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                     </div>
 
                     {layoutConfig.showTimer && (
-                      <div className="pt-1 border-t border-slate-100">
-                        <span className="text-[10px] font-bold text-slate-600 block mb-1">
-                          Timer Position
-                        </span>
-                        <div className="grid grid-cols-2 gap-1">
-                          {(['left', 'right'] as const).map((pos) => (
-                            <button
-                              key={pos}
-                              type="button"
-                              onClick={() => {
-                                pushSnapshot();
-                                setLayoutConfig(prev => ({ ...prev, timerPosition: pos }));
-                              }}
-                              className={`paper-btn py-1 text-[10px] font-black uppercase cursor-pointer ${
-                                layoutConfig.timerPosition === pos
-                                  ? '!bg-violet-600 !text-white'
-                                  : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
-                              }`}
-                            >
-                              {pos} Side
-                            </button>
-                          ))}
+                      <div className="space-y-2 pt-1 border-t border-slate-100">
+                        <div>
+                          <span className="text-[10px] font-bold text-slate-600 block mb-1">
+                            Timer Position
+                          </span>
+                          <div className="grid grid-cols-2 gap-1">
+                            {(['left', 'right'] as const).map((pos) => (
+                              <button
+                                key={pos}
+                                type="button"
+                                onClick={() => {
+                                  pushSnapshot();
+                                  setLayoutConfig(prev => ({ ...prev, timerPosition: pos }));
+                                }}
+                                className={`paper-btn py-1 text-[10px] font-black uppercase cursor-pointer ${
+                                  layoutConfig.timerPosition === pos
+                                    ? '!bg-violet-600 !text-white'
+                                    : 'bg-slate-50 text-slate-700 hover:bg-slate-100'
+                                }`}
+                              >
+                                {pos} Side
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-100">
+                          <NumberStepper
+                            label="Size"
+                            unit="%"
+                            value={layoutConfig.timerScale ?? 100}
+                            min={50}
+                            max={220}
+                            step={5}
+                            onChange={(val) => setLayoutConfig(prev => ({ ...prev, timerScale: val }))}
+                          />
+                          <NumberStepper
+                            label="Offset X"
+                            unit="px"
+                            value={layoutConfig.timerOffsetX ?? 0}
+                            min={-400}
+                            max={400}
+                            step={4}
+                            onChange={(val) => setLayoutConfig(prev => ({ ...prev, timerOffsetX: val }))}
+                          />
+                          <NumberStepper
+                            label="Offset Y"
+                            unit="px"
+                            value={layoutConfig.timerOffsetY ?? 0}
+                            min={-400}
+                            max={400}
+                            step={4}
+                            onChange={(val) => setLayoutConfig(prev => ({ ...prev, timerOffsetY: val }))}
+                          />
                         </div>
                       </div>
                     )}
@@ -3265,7 +3397,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                     </div>
                   </div>
 
-                  {/* 5. Racers List / Leaderboard Layout */}
+                  {/* 5. Racers List / Leaderboard Layout (Dock, Density, Columns, Size & Offset) */}
                   <div className="paper-card bg-white p-2 border border-slate-300 space-y-2">
                     <div className="flex items-center justify-between">
                       <span className="text-[11px] font-black text-slate-800 uppercase">
@@ -3367,6 +3499,36 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                               </button>
                             ))}
                           </div>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-100">
+                          <NumberStepper
+                            label="Size"
+                            unit="%"
+                            value={layoutConfig.racersListScale ?? 100}
+                            min={50}
+                            max={180}
+                            step={5}
+                            onChange={(val) => setLayoutConfig(prev => ({ ...prev, racersListScale: val }))}
+                          />
+                          <NumberStepper
+                            label="Offset X"
+                            unit="px"
+                            value={layoutConfig.racersListOffsetX ?? 0}
+                            min={-400}
+                            max={400}
+                            step={4}
+                            onChange={(val) => setLayoutConfig(prev => ({ ...prev, racersListOffsetX: val }))}
+                          />
+                          <NumberStepper
+                            label="Offset Y"
+                            unit="px"
+                            value={layoutConfig.racersListOffsetY ?? 0}
+                            min={-400}
+                            max={400}
+                            step={4}
+                            onChange={(val) => setLayoutConfig(prev => ({ ...prev, racersListOffsetY: val }))}
+                          />
                         </div>
                       </div>
                     )}

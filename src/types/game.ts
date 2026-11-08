@@ -111,30 +111,54 @@ export type ViewportAspectRatio = '1:1' | '16:9' | '4:3' | 'auto';
 
 export interface SimulationLayoutConfig {
   aspectRatio: ViewportAspectRatio;           // '1:1' | '16:9' | '4:3' | 'auto'
+  viewportScale?: number;                     // Arena viewport size percentage (default 100)
+  viewportOffsetX?: number;                   // Arena viewport X offset in px (default 0)
+  viewportOffsetY?: number;                   // Arena viewport Y offset in px (default 0)
   showTitle: boolean;                         // Whether to display the title badge
   customTitle: string;                        // Title text (default 'Minit Escape!')
   titlePosition: 'left' | 'center' | 'right'; // Alignment in top bar
+  titleScale?: number;                        // Title size percentage (default 100)
+  titleOffsetX?: number;                      // Title X offset in px (default 0)
+  titleOffsetY?: number;                      // Title Y offset in px (default 0)
   showTimer: boolean;                         // Whether to display the live timer
   timerPosition: 'left' | 'right';            // Position of timer in header
+  timerScale?: number;                        // Timer size percentage (default 100)
+  timerOffsetX?: number;                      // Timer X offset in px (default 0)
+  timerOffsetY?: number;                      // Timer Y offset in px (default 0)
   showRacersList: boolean;                    // Whether to display the racers leaderboard bar
   racersListPosition: 'bottom' | 'top';       // Above or below the arena canvas
   racersListStyle: 'detailed' | 'compact';    // Card density style
   racersListColumns: 'auto' | '8' | '4';      // Grid column mode
+  racersListScale?: number;                   // Racers list size percentage (default 100)
+  racersListOffsetX?: number;                 // Racers list X offset in px (default 0)
+  racersListOffsetY?: number;                 // Racers list Y offset in px (default 0)
   arenaTheme: 'classic_blue' | 'midnight' | 'emerald' | 'sunset' | 'violet';
   arenaPadding: 'compact' | 'normal' | 'spacious';
 }
 
 export const DEFAULT_LAYOUT_CONFIG: SimulationLayoutConfig = {
   aspectRatio: '4:3',
+  viewportScale: 100,
+  viewportOffsetX: 0,
+  viewportOffsetY: 0,
   showTitle: true,
   customTitle: 'Minit Escape!',
   titlePosition: 'center',
+  titleScale: 100,
+  titleOffsetX: 0,
+  titleOffsetY: 0,
   showTimer: true,
   timerPosition: 'left',
+  timerScale: 100,
+  timerOffsetX: 0,
+  timerOffsetY: 0,
   showRacersList: true,
   racersListPosition: 'bottom',
   racersListStyle: 'detailed',
   racersListColumns: 'auto',
+  racersListScale: 100,
+  racersListOffsetX: 0,
+  racersListOffsetY: 0,
   arenaTheme: 'classic_blue',
   arenaPadding: 'normal',
 };
