@@ -1,0 +1,87 @@
+@import "tailwindcss";
+
+:root {
+  --paper-shadow: 3px 4px 0px rgba(15, 23, 42, 0.85);
+  --paper-shadow-sm: 2px 2px 0px rgba(15, 23, 42, 0.85);
+  --paper-shadow-lg: 5px 6px 0px rgba(15, 23, 42, 0.9);
+}
+
+body {
+  font-family: 'Fredoka', cursive, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+  background-color: #9bb8e8;
+  background-image: 
+    linear-gradient(45deg, #adc6f0 25%, transparent 25%), 
+    linear-gradient(-45deg, #adc6f0 25%, transparent 25%), 
+    linear-gradient(45deg, transparent 75%, #adc6f0 75%), 
+    linear-gradient(-45deg, transparent 75%, #adc6f0 75%);
+  background-size: 48px 48px;
+  background-position: 0 0, 0 24px, 24px -24px, -24px 0;
+}
+
+.mono-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+.paper-card {
+  background: #ffffff;
+  border: 2px solid #0f172a;
+  box-shadow: var(--paper-shadow);
+  border-radius: 10px;
+}
+
+.paper-btn {
+  background: #ffffff;
+  color: #0f172a;
+  border: 2px solid #0f172a;
+  box-shadow: var(--paper-shadow-sm);
+  border-radius: 8px;
+  font-weight: 700;
+  cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  transition: transform 0.08s ease, box-shadow 0.08s ease, background-color 0.15s ease;
+  white-space: nowrap;
+}
+
+.paper-btn * {
+  pointer-events: none;
+}
+
+.paper-btn:hover {
+  transform: translate(-1px, -1px);
+  box-shadow: 3px 4px 0px rgba(15, 23, 42, 0.9);
+}
+
+.paper-btn:active {
+  transform: translate(1px, 1px);
+  box-shadow: 1px 1px 0px rgba(15, 23, 42, 0.9);
+}
+
+.paper-btn:focus-visible {
+  outline: 2px solid #0f172a;
+  outline-offset: 2px;
+}
+
+.paper-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  transform: none;
+  box-shadow: var(--paper-shadow-sm);
+}
+
+/* Custom scrollbar for editors */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: rgba(15, 23, 42, 0.06);
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(15, 23, 42, 0.35);
+  border-radius: 3px;
+}

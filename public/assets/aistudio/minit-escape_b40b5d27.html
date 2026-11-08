@@ -1,0 +1,2126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>Minit Escape</title>
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <!-- Pixi.js v7 -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pixi.js/7.3.2/pixi.min.js"></script>
+  <!-- Google Fonts for Craft Paper & Arcade Typography -->
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@600;700;800&family=JetBrains+Mono:wght@700;800&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --paper-shadow: 3px 4px 0px rgba(15, 23, 42, 0.85);
+      --paper-shadow-sm: 2px 2px 0px rgba(15, 23, 42, 0.85);
+    }
+    * {
+      box-sizing: border-box;
+      user-select: none;
+      -webkit-user-select: none;
+    }
+    body, html {
+      margin: 0;
+      padding: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      font-family: 'Fredoka', sans-serif;
+      background-color: #9bb8e8;
+      /* Checkered pastel craft-paper background */
+      background-image: 
+        linear-gradient(45deg, #adc6f0 25%, transparent 25%), 
+        linear-gradient(-45deg, #adc6f0 25%, transparent 25%), 
+        linear-gradient(45deg, transparent 75%, #adc6f0 75%), 
+        linear-gradient(-45deg, transparent 75%, #adc6f0 75%);
+      background-size: 48px 48px;
+      background-position: 0 0, 0 24px, 24px -24px, -24px 0;
+    }
+
+    /* Subtle grid lines over the checkerboard like the reference video */
+    .grid-overlay {
+      position: fixed;
+      inset: 0;
+      pointer-events: none;
+      background-size: 24px 24px;
+      background-image: 
+        linear-gradient(to right, rgba(30, 58, 138, 0.16) 1px, transparent 1px),
+        linear-gradient(to bottom, rgba(30, 58, 138, 0.16) 1px, transparent 1px);
+      z-index: 0;
+    }
+
+    /* Paper Cutout UI Styling */
+    .paper-card {
+      background: #ffffff;
+      border: 2.5px solid #0f172a;
+      box-shadow: var(--paper-shadow);
+      border-radius: 10px;
+      transition: transform 0.12s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow 0.12s ease;
+    }
+    .paper-btn {
+      background: #ffffff;
+      border: 2.5px solid #0f172a;
+      box-shadow: var(--paper-shadow-sm);
+      border-radius: 8px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: transform 0.08s ease, box-shadow 0.08s ease, background-color 0.15s ease;
+    }
+    .paper-btn:hover {
+      transform: translate(-1px, -1px);
+      box-shadow: 3px 4px 0px rgba(15, 23, 42, 0.9);
+    }
+    .paper-btn:active {
+      transform: translate(2px, 2px);
+      box-shadow: 0px 0px 0px rgba(15, 23, 42, 0.9);
+    }
+
+    /* Leaderboard Card Transitions */
+    .leader-card {
+      transition: all 0.28s cubic-bezier(0.34, 1.56, 0.64, 1);
+      border: 2px solid #0f172a;
+      box-shadow: 0 3px 0 #000000;
+    }
+    .mono-num {
+      font-family: 'JetBrains Mono', monospace;
+    }
+  </style>
+</head>
+<body class="flex flex-col items-center justify-between h-screen w-screen overflow-hidden relative">
+  <!-- Background Craft Grid Overlay -->
+  <div class="grid-overlay"></div>
+
+  <!-- Top Interactive Paper Cutout Control Bar -->
+  <header class="z-20 w-full max-w-4xl px-2 pt-2 flex flex-wrap items-center justify-between gap-1.5">
+    <!-- Brand & Map Selector -->
+    <div class="flex items-center gap-1.5 bg-amber-100 paper-card px-2.5 py-1">
+      <div class="w-5 h-5 bg-red-500 border-2 border-slate-900 rounded-sm relative flex items-center justify-center shadow-sm">
+        <div class="flex gap-0.5">
+          <div class="w-1.5 h-1.5 bg-white border border-black"></div>
+          <div class="w-1.5 h-1.5 bg-white border border-black"></div>
+        </div>
+      </div>
+      <span class="font-extrabold text-slate-900 text-xs sm:text-sm tracking-tight mr-1">Minit Escape!</span>
+      <select id="mapSelect" class="paper-btn bg-white text-slate-900 text-xs px-2 py-1 focus:outline-none">
+        <option value="classic_serpentine">Map 1: Viral Serpentine</option>
+        <option value="double_helix_chaos">Map 2: Twin Chute Chaos</option>
+        <option value="arena_gauntlet">Map 3: Zig-Zag Gauntlet</option>
+      </select>
+    </div>
+
+    <!-- Playback & Speed Controls -->
+    <div class="flex items-center gap-1 bg-white/95 paper-card px-2 py-1">
+      <button id="btnRestart" class="paper-btn bg-emerald-400 hover:bg-emerald-300 text-slate-900 text-xs px-2.5 py-1 flex items-center gap-1">
+        <span>↻</span> Restart
+      </button>
+      <button id="btnPause" class="paper-btn bg-amber-300 hover:bg-amber-200 text-slate-900 text-xs px-2.5 py-1">
+        ⏸ Pause
+      </button>
+      <button id="btnSpeed" class="paper-btn bg-sky-300 hover:bg-sky-200 text-slate-900 text-xs px-2 py-1 mono-num">
+        1.0x
+      </button>
+      <button id="btnAudio" class="paper-btn bg-rose-300 hover:bg-rose-200 text-slate-900 text-xs px-2 py-1" title="Toggle Ragtime Piano Bounce & SFX">
+        🔊 SFX: ON
+      </button>
+    </div>
+
+    <!-- Live Chaos Spawner Toolbar -->
+    <div class="flex items-center gap-1 bg-indigo-100 paper-card px-2 py-1">
+      <span class="text-[11px] font-extrabold text-slate-700 hidden md:inline mr-1">SPAWN:</span>
+      <button data-spawn="cherry_clone" class="spawn-btn paper-btn bg-rose-100 hover:bg-rose-200 text-slate-900 text-xs px-2 py-0.5" title="Drop Cloning Cherries on Track">
+        🍒 +Clone
+      </button>
+      <button data-spawn="knife" class="spawn-btn paper-btn bg-slate-100 hover:bg-slate-200 text-slate-900 text-xs px-2 py-0.5" title="Drop Lethal Knife on Track">
+        🔪 +Knife
+      </button>
+      <button data-spawn="star_dash" class="spawn-btn paper-btn bg-yellow-200 hover:bg-yellow-100 text-slate-900 text-xs px-2 py-0.5" title="Drop Turbo Star on Track">
+        ⭐ +Star
+      </button>
+      <button data-spawn="shield" class="spawn-btn paper-btn bg-cyan-100 hover:bg-cyan-200 text-slate-900 text-xs px-2 py-0.5" title="Drop Cardboard Shield on Track">
+        🛡️ +Shield
+      </button>
+      <button id="btnCloneWave" class="paper-btn bg-purple-300 hover:bg-purple-200 text-slate-900 text-xs px-2 py-0.5" title="Clone Every Surviving Racer!">
+        ⚡ 2x All
+      </button>
+    </div>
+  </header>
+
+  <!-- Main Center Stage: Pixi.js Board Container + Integrated Leaderboard -->
+  <main class="z-10 flex-1 w-full flex flex-col items-center justify-center px-2 py-1 min-h-0">
+    <!-- Outer Blue Frame matching the video's iconic board -->
+    <div id="gameFrame" class="relative flex flex-col items-center justify-between bg-[#4895ef] border-[3px] border-slate-900 rounded-xl shadow-[6px_8px_0px_rgba(15,23,42,0.85)] p-2 sm:p-3 max-h-full aspect-[9/15.2] h-full">
+      
+      <!-- Pixi Canvas Mount -->
+      <div id="canvasWrapper" class="relative w-full flex-1 min-h-0 flex items-center justify-center overflow-hidden rounded-lg">
+        <!-- Victory / Event Banner Overlay -->
+        <div id="winBanner" class="hidden absolute top-4 left-1/2 -translate-x-1/2 z-30 pointer-events-none">
+          <div class="paper-card bg-yellow-300 px-5 py-2.5 flex flex-col items-center text-center animate-bounce">
+            <span class="text-xs font-extrabold uppercase tracking-wider text-slate-800">🏆 WINNER REACHED 100%! 🏆</span>
+            <span id="winText" class="text-lg sm:text-xl font-black text-slate-900 mt-0.5">BLUE WINS!</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Live Animated Bottom Leaderboard (Exact match to reference video's 8-slot bar) -->
+      <div class="w-full pt-2 flex flex-col items-center">
+        <div id="leaderboardBar" class="w-full grid grid-cols-8 gap-1 bg-[#1e293b] p-1.5 rounded-md border-2 border-slate-950 shadow-inner">
+          <!-- Dynamically populated by ProgressSystem -->
+        </div>
+      </div>
+
+    </div>
+  </main>
+
+  <script>
+    /**
+     * ============================================================================
+     * 1. STRATEGY REGISTRY HYBRID ARCHITECTURE
+     * ============================================================================
+     * Decouples Pickups, Maps, Weapons, and Procedural Audio synthesis into a
+     * plug-and-play registry so new behaviors can be registered without modifying
+     * core ECS systems.
+     */
+    class StrategyRegistry {
+      constructor() {
+        this.categories = new Map();
+      }
+      register(category, key, strategy) {
+        if (!this.categories.has(category)) {
+          this.categories.set(category, new Map());
+        }
+        this.categories.get(category).set(key, strategy);
+      }
+      get(category, key) {
+        const cat = this.categories.get(category);
+        if (!cat || !cat.has(key)) {
+          console.warn(`[StrategyRegistry] Missing strategy: ${category}/${key}`);
+          return null;
+        }
+        return cat.get(key);
+      }
+      getAll(category) {
+        return this.categories.get(category) || new Map();
+      }
+    }
+
+    const Registry = new StrategyRegistry();
+
+    /**
+     * ============================================================================
+     * 2. PROCEDURAL RAGTIME PIANO & SFX ENGINE (Web Audio API Strategy)
+     * ============================================================================
+     * Recreates the viral video's classical/ragtime arpeggio piano notes on bounce
+     * plus crisp paper-slice, shatter, clone chime, and victory fanfare SFX.
+     */
+    class SoundEngine {
+      constructor() {
+        this.ctx = null;
+        this.enabled = true;
+        this.noteIndex = 0;
+        this.lastBounceSoundTime = 0;
+
+        // C# Minor / Ab Major energetic classical arpeggio sequence inspired by the video
+        this.melodyMidi = [
+          68, 72, 75, 80, 75, 72, 68, 72, 75, 80, 75, 72,
+          69, 73, 76, 81, 76, 73, 69, 73, 76, 81, 76, 73,
+          66, 70, 73, 78, 73, 70, 68, 72, 75, 80, 84, 80,
+          75, 72, 75, 80, 84, 87, 84, 80, 75, 72, 68, 63
+        ];
+      }
+
+      init() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume();
+        }
+      }
+
+      midiToFreq(midi) {
+        return 440 * Math.pow(2, (midi - 69) / 12);
+      }
+
+      play(strategyKey, payload = {}) {
+        if (!this.enabled) return;
+        this.init();
+        if (!this.ctx) return;
+        const strategy = Registry.get('audio', strategyKey);
+        if (strategy) strategy(this.ctx, this, payload);
+      }
+    }
+
+    const AudioSys = new SoundEngine();
+
+    // Register Audio Strategies
+    Registry.register('audio', 'bounce_note', (ctx, engine, { intensity = 1 }) => {
+      const now = ctx.currentTime;
+      // Throttle slightly so simultaneous sub-stepped collisions sound like a crisp piano roll
+      if (now - engine.lastBounceSoundTime < 0.042) return;
+      engine.lastBounceSoundTime = now;
+
+      const midi = engine.melodyMidi[engine.noteIndex % engine.melodyMidi.length];
+      engine.noteIndex++;
+      const freq = engine.midiToFreq(midi);
+
+      const osc = ctx.createOscillator();
+      const osc2 = ctx.createOscillator();
+      const gain = ctx.createGain();
+
+      // Bright percussive tack-piano timbre
+      osc.type = 'triangle';
+      osc2.type = 'sine';
+      osc.frequency.setValueAtTime(freq, now);
+      osc2.frequency.setValueAtTime(freq * 2, now);
+
+      const vol = Math.min(0.16, 0.09 * intensity);
+      gain.gain.setValueAtTime(0.001, now);
+      gain.gain.linearRampToValueAtTime(vol, now + 0.006);
+      gain.gain.exponentialRampToValueAtTime(0.0008, now + 0.22);
+
+      osc.connect(gain);
+      osc2.connect(gain);
+      gain.connect(ctx.destination);
+
+      osc.start(now);
+      osc2.start(now);
+      osc.stop(now + 0.23);
+      osc2.stop(now + 0.23);
+    });
+
+    Registry.register('audio', 'gate_break', (ctx) => {
+      const now = ctx.currentTime;
+      // Crisp snare/shatter noise + low punch
+      const bufferSize = ctx.sampleRate * 0.18;
+      const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+      const data = buffer.getChannelData(0);
+      for (let i = 0; i < bufferSize; i++) {
+        data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.05));
+      }
+      const noise = ctx.createBufferSource();
+      noise.buffer = buffer;
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'bandpass';
+      filter.frequency.setValueAtTime(950, now);
+
+      const gain = ctx.createGain();
+      gain.gain.setValueAtTime(0.28, now);
+      gain.gain.exponentialRampToValueAtTime(0.01, now + 0.18);
+
+      noise.connect(filter);
+      filter.connect(gain);
+      gain.connect(ctx.destination);
+      noise.start(now);
+    });
+
+    Registry.register('audio', 'cherry_clone', (ctx) => {
+      const now = ctx.currentTime;
+      [587.33, 880, 1174.66].forEach((freq, idx) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'sine';
+        osc.frequency.setValueAtTime(freq, now + idx * 0.045);
+        gain.gain.setValueAtTime(0.14, now + idx * 0.045);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.045 + 0.16);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + idx * 0.045);
+        osc.stop(now + idx * 0.045 + 0.17);
+      });
+    });
+
+    Registry.register('audio', 'knife_pickup', (ctx) => {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(600, now);
+      osc.frequency.exponentialRampToValueAtTime(1800, now + 0.09);
+      gain.gain.setValueAtTime(0.12, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.1);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.11);
+    });
+
+    Registry.register('audio', 'knife_kill', (ctx) => {
+      const now = ctx.currentTime;
+      // Metallic slash + paper rip crunch
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(1400, now);
+      osc.frequency.exponentialRampToValueAtTime(140, now + 0.14);
+      gain.gain.setValueAtTime(0.24, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.15);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.16);
+    });
+
+    Registry.register('audio', 'flood_petrify', (ctx) => {
+      const now = ctx.currentTime;
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = 'triangle';
+      osc.frequency.setValueAtTime(320, now);
+      osc.frequency.exponentialRampToValueAtTime(95, now + 0.18);
+      gain.gain.setValueAtTime(0.18, now);
+      gain.gain.exponentialRampToValueAtTime(0.001, now + 0.19);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(now);
+      osc.stop(now + 0.2);
+    });
+
+    Registry.register('audio', 'win_fanfare', (ctx) => {
+      const now = ctx.currentTime;
+      const notes = [523.25, 659.25, 783.99, 1046.50, 783.99, 1046.50];
+      const times = [0, 0.1, 0.2, 0.3, 0.45, 0.58];
+      notes.forEach((f, i) => {
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.type = 'triangle';
+        osc.frequency.setValueAtTime(f, now + times[i]);
+        gain.gain.setValueAtTime(0.2, now + times[i]);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + times[i] + 0.28);
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+        osc.start(now + times[i]);
+        osc.stop(now + times[i] + 0.3);
+      });
+    });
+
+    /**
+     * ============================================================================
+     * 3. RACER COLOR TEAMS (Exact 8 Teams from Reference Video)
+     * ============================================================================
+     */
+    const TEAMS = [
+      { id: 'red',     name: 'RED',     hex: 0xff1e1e, css: '#ff1e1e', bay: 0 },
+      { id: 'green',   name: 'GREEN',   hex: 0x22c55e, css: '#22c55e', bay: 1 },
+      { id: 'blue',    name: 'BLUE',    hex: 0x1d4ed8, css: '#1d4ed8', bay: 2 },
+      { id: 'yellow',  name: 'YELLOW',  hex: 0xfacc15, css: '#facc15', bay: 1 },
+      { id: 'cyan',    name: 'CYAN',    hex: 0x22d3ee, css: '#22d3ee', bay: 0 },
+      { id: 'magenta', name: 'PINK',    hex: 0xf43f5e, css: '#ec4899', bay: 2 },
+      { id: 'purple',  name: 'PURPLE',  hex: 0x9333ea, css: '#9333ea', bay: 3 },
+      { id: 'orange',  name: 'ORANGE',  hex: 0xf97316, css: '#f97316', bay: 3 }
+    ];
+    // Adjust magenta hex to vibrant hot pink/magenta like the video
+    TEAMS[5].hex = 0xff1493;
+
+    /**
+     * ============================================================================
+     * 4. ECS CORE (WORLD, ENTITIES, COMPONENTS, SYSTEMS)
+     * ============================================================================
+     */
+    class World {
+      constructor() {
+        this.entities = new Map();
+        this.nextId = 1;
+        this.systems = [];
+        this.tags = new Map();
+      }
+
+      createEntity() {
+        const id = this.nextId++;
+        this.entities.set(id, new Map());
+        return id;
+      }
+
+      destroyEntity(id) {
+        const comps = this.entities.get(id);
+        if (!comps) return;
+        if (comps.has('PaperSprite')) {
+          const sprite = comps.get('PaperSprite');
+          if (sprite.container && sprite.container.parent) {
+            sprite.container.parent.removeChild(sprite.container);
+            sprite.container.destroy({ children: true });
+          }
+        }
+        this.entities.delete(id);
+      }
+
+      addComponent(id, name, data) {
+        const ent = this.entities.get(id);
+        if (ent) ent.set(name, data);
+        return data;
+      }
+
+      getComponent(id, name) {
+        const ent = this.entities.get(id);
+        return ent ? ent.get(name) : undefined;
+      }
+
+      query(...componentNames) {
+        const results = [];
+        for (const [id, comps] of this.entities.entries()) {
+          let match = true;
+          for (let i = 0; i < componentNames.length; i++) {
+            if (!comps.has(componentNames[i])) {
+              match = false;
+              break;
+            }
+          }
+          if (match) results.push(id);
+        }
+        return results;
+      }
+
+      addSystem(sys) {
+        this.systems.push(sys);
+      }
+
+      update(dt) {
+        for (const sys of this.systems) {
+          sys.update(this, dt);
+        }
+      }
+
+      clear() {
+        for (const id of Array.from(this.entities.keys())) {
+          this.destroyEntity(id);
+        }
+        this.nextId = 1;
+      }
+    }
+
+    /**
+     * ============================================================================
+     * 5. MAP STRATEGY REGISTRY (Track Geometries, Gates, Pickups, Waypoints)
+     * ============================================================================
+     * Virtual coordinate space: 500 x 800
+     */
+    const VIRTUAL_W = 500;
+    const VIRTUAL_H = 800;
+
+    // Helper to convert rectangles into wall segments & floor polygons
+    Registry.register('map', 'classic_serpentine', {
+      name: 'Viral Serpentine',
+      // Walkable rectangles that compose the white track
+      corridors: [
+        // 4 Left Starting Bays
+        { x: 45, y: 375, w: 130, h: 48 }, // Bay 0 (Cyan/Red)
+        { x: 45, y: 455, w: 130, h: 48 }, // Bay 1 (Yellow/Green)
+        { x: 45, y: 535, w: 130, h: 48 }, // Bay 2 (Magenta/Blue)
+        { x: 45, y: 615, w: 130, h: 48 }, // Bay 3 (Orange/Purple)
+        // Central Vertical Chute (x: 175 to 245)
+        { x: 175, y: 215, w: 70,  h: 535 },
+        // Top-Middle Bridge (y: 215 to 285, x: 175 to 345)
+        { x: 175, y: 215, w: 170, h: 70 },
+        // Mid-Right Downward Chute (x: 275 to 345, y: 215 to 750)
+        { x: 275, y: 215, w: 70,  h: 535 },
+        // Bottom U-Turn Bridge (y: 685 to 750, x: 275 to 455)
+        { x: 275, y: 685, w: 180, h: 65 },
+        // Far-Right Upward Straightaway (x: 400 to 455, y: 120 to 750)
+        { x: 400, y: 120, w: 55,  h: 630 },
+        // Top Horizontal Straightaway (x: 45 to 455, y: 120 to 175)
+        { x: 45,  y: 120, w: 410, h: 55 },
+        // Upper-Left Knife Ambush Chamber (x: 45 to 165, y: 175 to 315)
+        { x: 45,  y: 175, w: 120, h: 140 },
+        // Final Narrow Exit Neck (x: 45 to 100, y: 78 to 120)
+        { x: 45,  y: 78,  w: 55,  h: 42 },
+        // Top Pre-Finish Horizontal (x: 45 to 255, y: 78 to 105)
+        { x: 45,  y: 78,  w: 210, h: 27 },
+        // Green Checkered Finish Alcove (x: 205 to 255, y: 18 to 78)
+        { x: 205, y: 18,  w: 50,  h: 60 }
+      ],
+      finishZone: { x: 205, y: 18, w: 50, h: 55 },
+      baySpawns: [
+        { x: 145, y: 392, vx: 3.1, vy: -1.8 }, // Cyan
+        { x: 145, y: 410, vx: -2.9, vy: 2.1 }, // Red
+        { x: 145, y: 472, vx: 3.2, vy: 1.7 },  // Yellow
+        { x: 145, y: 490, vx: -2.8, vy: -2.2 },// Green
+        { x: 145, y: 552, vx: 3.0, vy: -1.9 }, // Magenta
+        { x: 145, y: 570, vx: -3.1, vy: 2.0 }, // Blue
+        { x: 145, y: 632, vx: 2.9, vy: 2.1 },  // Orange
+        { x: 145, y: 650, vx: -3.2, vy: -1.8 } // Purple
+      ],
+      gates: [
+        // 4 Bay Exit Vertical Gates (break fast as racers bounce in their bays)
+        { id: 'bay0', x: 170, y: 375, w: 10, h: 48, hp: 5, color: 0x22d3ee, orientation: 'V' },
+        { id: 'bay1', x: 170, y: 455, w: 10, h: 48, hp: 5, color: 0x22c55e, orientation: 'V' },
+        { id: 'bay2', x: 170, y: 535, w: 10, h: 48, hp: 5, color: 0x1d4ed8, orientation: 'V' },
+        { id: 'bay3', x: 170, y: 615, w: 10, h: 48, hp: 5, color: 0xfacc15, orientation: 'V' },
+        // Horizontal Striped Chute Gates (Just like the video!)
+        { id: 'chute_blue',   x: 175, y: 602, w: 70, h: 14, hp: 4, color: 0x1d4ed8, orientation: 'H' },
+        { id: 'chute_yellow', x: 175, y: 522, w: 70, h: 14, hp: 5, color: 0xfacc15, orientation: 'H' },
+        { id: 'chute_red',    x: 175, y: 442, w: 70, h: 14, hp: 6, color: 0xff1e1e, orientation: 'H' },
+        { id: 'chute_green',  x: 175, y: 345, w: 70, h: 16, hp: 14, color: 0x22c55e, orientation: 'H', triggersFlood: true },
+        // Final Grey Gate before Finish Line (forces chaotic Knife battle in the upper-left chamber!)
+        { id: 'final_gate',   x: 45,  y: 105, w: 55, h: 15, hp: 22, color: 0x64748b, orientation: 'H' }
+      ],
+      pickups: [
+        { type: 'cherry_clone', x: 200, y: 255 },
+        { type: 'cherry_clone', x: 260, y: 255 },
+        { type: 'cherry_clone', x: 318, y: 255 },
+        { type: 'knife',        x: 105, y: 255 }
+      ],
+      // Centerline waypoints for accurate 0% -> 100% progress calculation & rising cyan flood
+      waypoints: [
+        { x: 110, y: 640 }, // 0% Start Bays
+        { x: 210, y: 640 },
+        { x: 210, y: 350 }, // Up the first chute
+        { x: 210, y: 250 }, // Cherry chamber
+        { x: 310, y: 250 },
+        { x: 310, y: 718 }, // Down the middle chute
+        { x: 428, y: 718 }, // Bottom right turn
+        { x: 428, y: 148 }, // Top right corner
+        { x: 105, y: 148 }, // Top left knife chamber entry
+        { x: 72,  y: 105 }, // Final gate
+        { x: 72,  y: 91 },
+        { x: 230, y: 91 },
+        { x: 230, y: 40 }   // 100% Green Finish Alcove
+      ]
+    });
+
+    Registry.register('map', 'double_helix_chaos', {
+      name: 'Twin Chute Chaos',
+      corridors: [
+        { x: 45, y: 380, w: 120, h: 48 },
+        { x: 45, y: 460, w: 120, h: 48 },
+        { x: 45, y: 540, w: 120, h: 48 },
+        { x: 45, y: 620, w: 120, h: 48 },
+        { x: 165, y: 210, w: 75, h: 535 },
+        { x: 165, y: 210, w: 185, h: 70 },
+        { x: 275, y: 210, w: 75, h: 535 },
+        { x: 165, y: 440, w: 185, h: 55 }, // Cross-bridge between chutes!
+        { x: 275, y: 680, w: 180, h: 65 },
+        { x: 395, y: 120, w: 60, h: 625 },
+        { x: 45, y: 120, w: 410, h: 60 },
+        { x: 45, y: 180, w: 110, h: 145 },
+        { x: 45, y: 78, w: 55, h: 42 },
+        { x: 45, y: 78, w: 210, h: 27 },
+        { x: 205, y: 18, w: 50, h: 60 }
+      ],
+      finishZone: { x: 205, y: 18, w: 50, h: 55 },
+      baySpawns: [
+        { x: 135, y: 395, vx: 3.1, vy: -1.8 },
+        { x: 135, y: 412, vx: -2.9, vy: 2.1 },
+        { x: 135, y: 475, vx: 3.2, vy: 1.7 },
+        { x: 135, y: 492, vx: -2.8, vy: -2.2 },
+        { x: 135, y: 555, vx: 3.0, vy: -1.9 },
+        { x: 135, y: 572, vx: -3.1, vy: 2.0 },
+        { x: 135, y: 635, vx: 2.9, vy: 2.1 },
+        { x: 135, y: 652, vx: -3.2, vy: -1.8 }
+      ],
+      gates: [
+        { id: 'bay0', x: 160, y: 380, w: 10, h: 48, hp: 4, color: 0x22d3ee, orientation: 'V' },
+        { id: 'bay1', x: 160, y: 460, w: 10, h: 48, hp: 4, color: 0x22c55e, orientation: 'V' },
+        { id: 'bay2', x: 160, y: 540, w: 10, h: 48, hp: 4, color: 0x1d4ed8, orientation: 'V' },
+        { id: 'bay3', x: 160, y: 620, w: 10, h: 48, hp: 4, color: 0xfacc15, orientation: 'V' },
+        { id: 'chute_green', x: 165, y: 340, w: 75, h: 16, hp: 12, color: 0x22c55e, orientation: 'H', triggersFlood: true },
+        { id: 'final_gate',  x: 45,  y: 105, w: 55, h: 15, hp: 20, color: 0x64748b, orientation: 'H' }
+      ],
+      pickups: [
+        { type: 'cherry_clone', x: 195, y: 245 },
+        { type: 'cherry_clone', x: 255, y: 245 },
+        { type: 'cherry_clone', x: 315, y: 245 },
+        { type: 'star_dash',    x: 255, y: 468 },
+        { type: 'knife',        x: 312, y: 580 },
+        { type: 'knife',        x: 100, y: 250 },
+        { type: 'shield',       x: 425, y: 420 }
+      ],
+      waypoints: [
+        { x: 110, y: 640 },
+        { x: 202, y: 640 },
+        { x: 202, y: 245 },
+        { x: 312, y: 245 },
+        { x: 312, y: 712 },
+        { x: 425, y: 712 },
+        { x: 425, y: 150 },
+        { x: 100, y: 150 },
+        { x: 72,  y: 91 },
+        { x: 230, y: 91 },
+        { x: 230, y: 40 }
+      ]
+    });
+
+    Registry.register('map', 'arena_gauntlet', {
+      name: 'Zig-Zag Gauntlet',
+      corridors: [
+        { x: 45, y: 375, w: 130, h: 48 },
+        { x: 45, y: 455, w: 130, h: 48 },
+        { x: 45, y: 535, w: 130, h: 48 },
+        { x: 45, y: 615, w: 130, h: 48 },
+        { x: 175, y: 215, w: 70,  h: 535 },
+        { x: 175, y: 215, w: 170, h: 70 },
+        { x: 275, y: 215, w: 70,  h: 535 },
+        { x: 275, y: 685, w: 180, h: 65 },
+        { x: 400, y: 120, w: 55,  h: 630 },
+        { x: 45,  y: 120, w: 410, h: 55 },
+        { x: 45,  y: 175, w: 120, h: 140 },
+        { x: 45,  y: 78,  w: 55,  h: 42 },
+        { x: 45,  y: 78,  w: 210, h: 27 },
+        { x: 205, y: 18,  w: 50,  h: 60 }
+      ],
+      finishZone: { x: 205, y: 18, w: 50, h: 55 },
+      baySpawns: [
+        { x: 145, y: 392, vx: 3.3, vy: -2.0 },
+        { x: 145, y: 410, vx: -3.1, vy: 2.2 },
+        { x: 145, y: 472, vx: 3.4, vy: 1.9 },
+        { x: 145, y: 490, vx: -3.0, vy: -2.3 },
+        { x: 145, y: 552, vx: 3.2, vy: -2.1 },
+        { x: 145, y: 570, vx: -3.3, vy: 2.1 },
+        { x: 145, y: 632, vx: 3.1, vy: 2.2 },
+        { x: 145, y: 650, vx: -3.4, vy: -2.0 }
+      ],
+      gates: [
+        { id: 'bay0', x: 170, y: 375, w: 10, h: 48, hp: 3, color: 0x22d3ee, orientation: 'V' },
+        { id: 'bay1', x: 170, y: 455, w: 10, h: 48, hp: 3, color: 0x22c55e, orientation: 'V' },
+        { id: 'bay2', x: 170, y: 535, w: 10, h: 48, hp: 3, color: 0x1d4ed8, orientation: 'V' },
+        { id: 'bay3', x: 170, y: 615, w: 10, h: 48, hp: 3, color: 0xfacc15, orientation: 'V' },
+        { id: 'chute_green', x: 175, y: 345, w: 70, h: 16, hp: 10, color: 0x22c55e, orientation: 'H', triggersFlood: true },
+        { id: 'mid_gate',    x: 275, y: 490, w: 70, h: 15, hp: 12, color: 0xf43f5e, orientation: 'H' },
+        { id: 'final_gate',  x: 45,  y: 105, w: 55, h: 15, hp: 25, color: 0x64748b, orientation: 'H' }
+      ],
+      pickups: [
+        { type: 'cherry_clone', x: 200, y: 255 },
+        { type: 'cherry_clone', x: 260, y: 255 },
+        { type: 'cherry_clone', x: 318, y: 255 },
+        { type: 'cherry_clone', x: 310, y: 380 },
+        { type: 'star_dash',    x: 310, y: 620 },
+        { type: 'shield',       x: 428, y: 520 },
+        { type: 'knife',        x: 428, y: 260 },
+        { type: 'knife',        x: 105, y: 255 }
+      ],
+      waypoints: [
+        { x: 110, y: 640 },
+        { x: 210, y: 640 },
+        { x: 210, y: 350 },
+        { x: 210, y: 250 },
+        { x: 310, y: 250 },
+        { x: 310, y: 718 },
+        { x: 428, y: 718 },
+        { x: 428, y: 148 },
+        { x: 105, y: 148 },
+        { x: 72,  y: 105 },
+        { x: 72,  y: 91 },
+        { x: 230, y: 91 },
+        { x: 230, y: 40 }
+      ]
+    });
+
+    /**
+     * ============================================================================
+     * 6. PICKUP STRATEGY REGISTRY (Cherry Clone, Knife, Star Dash, Shield)
+     * ============================================================================
+     */
+    Registry.register('pickup', 'cherry_clone', {
+      label: '+1 CLONE!',
+      color: 0xff1e56,
+      drawIcon(g) {
+        // Paper cutout white sticker backing
+        g.lineStyle(3, 0x0f172a, 1);
+        g.beginFill(0xffffff);
+        g.drawCircle(-7, 5, 8.5);
+        g.drawCircle(7, 5, 8.5);
+        g.endFill();
+
+        // Stems
+        g.lineStyle(2.5, 0x15803d, 1);
+        g.moveTo(-7, 2);
+        g.quadraticCurveTo(-2, -12, 2, -13);
+        g.moveTo(7, 2);
+        g.quadraticCurveTo(4, -10, 2, -13);
+
+        // Leaf
+        g.lineStyle(1.5, 0x0f172a, 1);
+        g.beginFill(0x22c55e);
+        g.drawEllipse(5, -13, 6, 3);
+        g.endFill();
+
+        // Twin Glossy Red Cherries
+        g.lineStyle(2, 0x0f172a, 1);
+        g.beginFill(0xef4444);
+        g.drawCircle(-7, 6, 6.5);
+        g.drawCircle(7, 6, 6.5);
+        g.endFill();
+
+        // Specular paper highlights
+        g.lineStyle(0);
+        g.beginFill(0xffffff, 0.85);
+        g.drawCircle(-9, 4, 2);
+        g.drawCircle(5, 4, 2);
+        g.endFill();
+      },
+      onCollect(world, racerId, pickupId, sim) {
+        const pos = world.getComponent(racerId, 'Transform');
+        const vel = world.getComponent(racerId, 'Velocity');
+        const state = world.getComponent(racerId, 'RacerState');
+        if (!pos || !vel || !state) return;
+
+        // Spawn an identical clone with slightly diverged velocity vector!
+        const speed = Math.hypot(vel.vx, vel.vy) || 3.2;
+        const angle = Math.atan2(vel.vy, vel.vx);
+        const cloneId = sim.spawnRacer(state.team, pos.x + 4, pos.y + 4, Math.cos(angle + 0.45) * speed, Math.sin(angle + 0.45) * speed);
+        const cloneState = world.getComponent(cloneId, 'RacerState');
+        if (cloneState) cloneState.invulnTimer = 0.35;
+
+        AudioSys.play('cherry_clone');
+        sim.spawnFloatingText(pos.x, pos.y - 12, '2X CLONE!', state.team.hex);
+        sim.spawnConfetti(pos.x, pos.y, state.team.hex, 14);
+      }
+    });
+
+    Registry.register('pickup', 'knife', {
+      label: 'KNIFE!',
+      color: 0xe2e8f0,
+      drawIcon(g) {
+        // Large Iconic Paper-Cutout Kitchen Knife (Matches the upper-left chamber in the video!)
+        g.rotation = -0.65;
+        // Shadow
+        g.lineStyle(0);
+        g.beginFill(0x000000, 0.22);
+        g.drawRoundedRect(-20, -4, 42, 12, 3);
+        g.endFill();
+
+        // Blade
+        g.lineStyle(2.5, 0x0f172a, 1);
+        g.beginFill(0xf8fafc);
+        g.moveTo(-4, -7);
+        g.lineTo(24, -7);
+        g.quadraticCurveTo(22, 6, -4, 6);
+        g.closePath();
+        g.endFill();
+
+        // Metallic edge shine
+        g.lineStyle(1.5, 0xcbd5e1, 1);
+        g.moveTo(-2, 3);
+        g.lineTo(18, -3);
+
+        // Handle
+        g.lineStyle(2.5, 0x0f172a, 1);
+        g.beginFill(0x1e293b);
+        g.drawRoundedRect(-20, -6, 16, 8, 2);
+        g.endFill();
+
+        // Rivets
+        g.lineStyle(0);
+        g.beginFill(0xffffff);
+        g.drawCircle(-15, -2, 1.4);
+        g.drawCircle(-9, -2, 1.4);
+        g.endFill();
+      },
+      onCollect(world, racerId, pickupId, sim) {
+        const state = world.getComponent(racerId, 'RacerState');
+        const pos = world.getComponent(racerId, 'Transform');
+        if (!state || !pos) return;
+        state.weapon = 'knife';
+        state.weaponCooldown = 0.15;
+        AudioSys.play('knife_pickup');
+        sim.spawnFloatingText(pos.x, pos.y - 14, 'ARMED!', 0xf8fafc);
+      }
+    });
+
+    Registry.register('pickup', 'star_dash', {
+      label: 'TURBO!',
+      color: 0xfacc15,
+      drawIcon(g) {
+        g.lineStyle(2.5, 0x0f172a, 1);
+        g.beginFill(0xfacc15);
+        const pts = [];
+        for (let i = 0; i < 10; i++) {
+          const r = i % 2 === 0 ? 13 : 6;
+          const a = (i * Math.PI) / 5 - Math.PI / 2;
+          pts.push(Math.cos(a) * r, Math.sin(a) * r);
+        }
+        g.drawPolygon(pts);
+        g.endFill();
+      },
+      onCollect(world, racerId, pickupId, sim) {
+        const state = world.getComponent(racerId, 'RacerState');
+        const pos = world.getComponent(racerId, 'Transform');
+        if (!state || !pos) return;
+        state.speedBoostTimer = 4.5;
+        AudioSys.play('cherry_clone');
+        sim.spawnFloatingText(pos.x, pos.y - 14, 'SPEED UP!', 0xfacc15);
+        sim.spawnConfetti(pos.x, pos.y, 0xfacc15, 14);
+      }
+    });
+
+    Registry.register('pickup', 'shield', {
+      label: 'SHIELD!',
+      color: 0x38bdf8,
+      drawIcon(g) {
+        g.lineStyle(2.5, 0x0f172a, 1);
+        g.beginFill(0x38bdf8);
+        g.moveTo(0, -12);
+        g.lineTo(11, -7);
+        g.lineTo(9, 6);
+        g.lineTo(0, 13);
+        g.lineTo(-9, 6);
+        g.lineTo(-11, -7);
+        g.closePath();
+        g.endFill();
+      },
+      onCollect(world, racerId, pickupId, sim) {
+        const state = world.getComponent(racerId, 'RacerState');
+        const pos = world.getComponent(racerId, 'Transform');
+        if (!state || !pos) return;
+        state.shield = true;
+        AudioSys.play('cherry_clone');
+        sim.spawnFloatingText(pos.x, pos.y - 14, 'SHIELDED!', 0x38bdf8);
+      }
+    });
+
+    /**
+     * ============================================================================
+     * 7. ECS SYSTEMS IMPLEMENTATION
+     * ============================================================================
+     */
+
+    // --- SYSTEM 1: Physics & Elastic Sub-Stepped Collision System ---
+    class PhysicsSystem {
+      constructor(sim) {
+        this.sim = sim;
+      }
+
+      update(world, dt) {
+        const racers = world.query('Transform', 'Velocity', 'Collider', 'RacerState', 'PaperSprite');
+        const gates = world.query('Transform', 'Gate');
+        const subSteps = 4;
+        const stepDt = dt / subSteps;
+
+        for (let step = 0; step < subSteps; step++) {
+          // 1. Advance positions & resolve track corridor containment
+          for (const id of racers) {
+            const state = world.getComponent(id, 'RacerState');
+            const pos = world.getComponent(id, 'Transform');
+            const vel = world.getComponent(id, 'Velocity');
+            const col = world.getComponent(id, 'Collider');
+            const sprite = world.getComponent(id, 'PaperSprite');
+
+            if (!state.alive) continue;
+
+            // Update timers
+            if ( step === 0 ) {
+              if (state.speedBoostTimer > 0) state.speedBoostTimer = Math.max(0, state.speedBoostTimer - dt);
+              if (state.invulnTimer > 0) state.invulnTimer = Math.max(0, state.invulnTimer - dt);
+              if (state.weaponCooldown > 0) state.weaponCooldown = Math.max(0, state.weaponCooldown - dt);
+            }
+
+            // Normalize speed to crisp constant arcade velocity
+            const targetSpeed = (state.speedBoostTimer > 0 ? 4.8 : 3.25) * 60;
+            const curSpeed = Math.hypot(vel.vx, vel.vy) || 1;
+            vel.vx = (vel.vx / curSpeed) * targetSpeed;
+            vel.vy = (vel.vy / curSpeed) * targetSpeed;
+
+            // Prevent near-perfect horizontal or vertical infinite loops by adding tiny angle nudge
+            if (Math.abs(vel.vx) < 28) vel.vx = (vel.vx >= 0 ? 1 : -1) * 38;
+            if (Math.abs(vel.vy) < 28) vel.vy = (vel.vy >= 0 ? 1 : -1) * 38;
+
+            const half = col.size / 2;
+
+            // Move X and check corridor walkability
+            const nextX = pos.x + vel.vx * stepDt;
+            if (!this.sim.isBoxInsideTrack(nextX, pos.y, half)) {
+              vel.vx = -vel.vx;
+              this.triggerBounce(sprite, true, false);
+            } else {
+              pos.x = nextX;
+            }
+
+            // Move Y and check corridor walkability
+            const nextY = pos.y + vel.vy * stepDt;
+            if (!this.sim.isBoxInsideTrack(pos.x, nextY, half)) {
+              vel.vy = -vel.vy;
+              this.triggerBounce(sprite, false, true);
+            } else {
+              pos.y = nextY;
+            }
+
+            // 2. Check Collisions with Breakable Striped Gates
+            for (const gId of gates) {
+              const gPos = world.getComponent(gId, 'Transform');
+              const gate = world.getComponent(gId, 'Gate');
+              if (!gPos || !gate || gate.hp <= 0) continue;
+
+              if (this.aabbOverlap(pos.x - half, pos.y - half, col.size, col.size, gPos.x, gPos.y, gate.w, gate.h)) {
+                // Determine bounce axis
+                const cx = gPos.x + gate.w / 2;
+                const cy = gPos.y + gate.h / 2;
+                const dx = pos.x - cx;
+                const dy = pos.y - cy;
+                const overlapX = (half + gate.w / 2) - Math.abs(dx);
+                const overlapY = (half + gate.h / 2) - Math.abs(dy);
+
+                if (overlapX < overlapY) {
+                  pos.x += dx > 0 ? overlapX : -overlapX;
+                  vel.vx = Math.abs(vel.vx) * (dx > 0 ? 1 : -1);
+                  this.triggerBounce(sprite, true, false);
+                } else {
+                  pos.y += dy > 0 ? overlapY : -overlapY;
+                  vel.vy = Math.abs(vel.vy) * (dy > 0 ? 1 : -1);
+                  this.triggerBounce(sprite, false, true);
+                }
+
+                // Damage Gate (throttled per gate so it takes rhythmic bounces like the video)
+                const now = performance.now();
+                if (now - gate.lastHitTime > 70) {
+                  gate.lastHitTime = now;
+                  gate.hp--;
+                  gate.hitFlash = 1.0;
+                  this.sim.spawnConfetti(pos.x, pos.y, gate.color, 5);
+
+                  if (gate.hp <= 0) {
+                    AudioSys.play('gate_break');
+                    this.sim.spawnConfetti(cx, cy, gate.color, 26);
+                    this.sim.addScreenShake(5.5);
+                    if (gate.triggersFlood) {
+                      this.sim.floodActive = true;
+                      this.sim.spawnFloatingText(cx, cy, 'FLOOD RELEASED!', 0x00f5d4);
+                    }
+                    world.destroyEntity(gId);
+                  }
+                }
+              }
+            }
+
+            // 3. Check Finish Zone!
+            const fz = this.sim.currentMap.finishZone;
+            if (this.aabbOverlap(pos.x - half, pos.y - half, col.size, col.size, fz.x, fz.y, fz.w, fz.h)) {
+              state.progress = 100;
+              if (!this.sim.winnerDeclared) {
+                this.sim.declareWinner(state.team);
+              }
+            }
+          }
+
+          // 4. Racer-to-Racer Elastic Collisions + Combat (Knife Slicing!)
+          for (let i = 0; i < racers.length; i++) {
+            for (let j = i + 1; j < racers.length; j++) {
+              const idA = racers[i];
+              const idB = racers[j];
+              const stA = world.getComponent(idA, 'RacerState');
+              const stB = world.getComponent(idB, 'RacerState');
+              if (!stA.alive && !stB.alive) continue;
+
+              const pA = world.getComponent(idA, 'Transform');
+              const pB = world.getComponent(idB, 'Transform');
+              const vA = world.getComponent(idA, 'Velocity');
+              const vB = world.getComponent(idB, 'Velocity');
+              const cA = world.getComponent(idA, 'Collider');
+              const cB = world.getComponent(idB, 'Collider');
+              const spA = world.getComponent(idA, 'PaperSprite');
+              const spB = world.getComponent(idB, 'PaperSprite');
+
+              const minDist = (cA.size + cB.size) * 0.48;
+              const dx = pB.x - pA.x;
+              const dy = pB.y - pA.y;
+              if (Math.abs(dx) < minDist && Math.abs(dy) < minDist) {
+                // Check Combat Interaction FIRST (Armed Racer vs Rival Alive Racer)
+                this.handleCombatContact(world, idA, idB, stA, stB, pA, pB);
+
+                // Resolve Penetration & Elastic Bounce
+                const overlapX = minDist - Math.abs(dx);
+                const overlapY = minDist - Math.abs(dy);
+
+                if (overlapX < overlapY) {
+                  const sign = dx >= 0 ? 1 : -1;
+                  if (stA.alive && stB.alive) {
+                    const nA = pA.x - sign * overlapX * 0.5;
+                    const nB = pB.x + sign * overlapX * 0.5;
+                    if (this.sim.isBoxInsideTrack(nA, pA.y, cA.size / 2)) pA.x = nA;
+                    if (this.sim.isBoxInsideTrack(nB, pB.y, cB.size / 2)) pB.x = nB;
+                    const tmp = vA.vx;
+                    vA.vx = vB.vx;
+                    vB.vx = tmp;
+                  } else if (stA.alive && !stB.alive) {
+                    // Bounce off petrified grey stone corpse!
+                    pA.x -= sign * overlapX;
+                    vA.vx = -sign * Math.abs(vA.vx);
+                  } else if (!stA.alive && stB.alive) {
+                    pB.x += sign * overlapX;
+                    vB.vx = sign * Math.abs(vB.vx);
+                  }
+                  if (stA.alive) this.triggerBounce(spA, true, false, 0.7);
+                  if (stB.alive) this.triggerBounce(spB, true, false, 0.7);
+                } else {
+                  const sign = dy >= 0 ? 1 : -1;
+                  if (stA.alive && stB.alive) {
+                    const nA = pA.y - sign * overlapY * 0.5;
+                    const nB = pB.y + sign * overlapY * 0.5;
+                    if (this.sim.isBoxInsideTrack(pA.x, nA, cA.size / 2)) pA.y = nA;
+                    if (this.sim.isBoxInsideTrack(pB.x, nB, cB.size / 2)) pB.y = nB;
+                    const tmp = vA.vy;
+                    vA.vy = vB.vy;
+                    vB.vy = tmp;
+                  } else if (stA.alive && !stB.alive) {
+                    pA.y -= sign * overlapY;
+                    vA.vy = -sign * Math.abs(vA.vy);
+                  } else if (!stA.alive && stB.alive) {
+                    pB.y += sign * overlapY;
+                    vB.vy = sign * Math.abs(vB.vy);
+                  }
+                  if (stA.alive) this.triggerBounce(spA, false, true, 0.7);
+                  if (stB.alive) this.triggerBounce(spB, false, true, 0.7);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      handleCombatContact(world, idA, idB, stA, stB, pA, pB) {
+        if (!stA.alive || !stB.alive) return;
+        // Same color clones don't slice each other
+        if (stA.team.id === stB.team.id) return;
+
+        if (stA.weapon === 'knife' && stA.weaponCooldown <= 0 && stB.invulnTimer <= 0) {
+          this.executeKnifeStrike(world, idA, idB, stA, stB, pA, pB);
+        } else if (stB.weapon === 'knife' && stB.weaponCooldown <= 0 && stA.invulnTimer <= 0) {
+          this.executeKnifeStrike(world, idB, idA, stB, stA, pB, pA);
+        }
+      }
+
+      executeKnifeStrike(world, attackerId, victimId, attState, vicState, attPos, vicPos) {
+        // Consume knife and drop it back onto the floor after a short cooldown so the melee chaos continues!
+        attState.weapon = null;
+        const dropX = (attPos.x + vicPos.x) * 0.5;
+        const dropY = (attPos.y + vicPos.y) * 0.5;
+
+        if (vicState.shield) {
+          vicState.shield = false;
+          vicState.invulnTimer = 0.5;
+          AudioSys.play('gate_break');
+          this.sim.spawnFloatingText(vicPos.x, vicPos.y - 12, 'SHIELD BLOCK!', 0x38bdf8);
+          this.sim.spawnConfetti(vicPos.x, vicPos.y, 0x38bdf8, 18);
+        } else {
+          // Petrify victim into a cracked grey stone block and burst colored ink/confetti splatter!
+          vicState.alive = false;
+          vicState.petrifiedBy = 'knife';
+          AudioSys.play('knife_kill');
+          this.sim.spawnInkSplatter(vicPos.x, vicPos.y, vicState.team.hex);
+          this.sim.spawnConfetti(vicPos.x, vicPos.y, vicState.team.hex, 34);
+          this.sim.spawnFloatingText(vicPos.x, vicPos.y - 14, 'SLICED!', vicState.team.hex);
+          this.sim.triggerHitStop(0.055);
+          this.sim.addScreenShake(7.5);
+        }
+
+        // Respawn the dropped knife on the track so the next racer can grab it (just like the video!)
+        this.sim.spawnPickup('knife', dropX, dropY, 0.45);
+      }
+
+      triggerBounce(sprite, hitX, hitY, audioIntensity = 1.0) {
+        if (hitX) {
+          sprite.scaleX = 0.68;
+          sprite.scaleY = 1.32;
+        } else if (hitY) {
+          sprite.scaleX = 1.32;
+          sprite.scaleY = 0.68;
+        }
+        AudioSys.play('bounce_note', { intensity: audioIntensity });
+      }
+
+      aabbOverlap(x1, y1, w1, h1, x2, y2, w2, h2) {
+        return x1 < x2 + w2 && x1 + w1 > x2 && y1 < y2 + h2 && y1 + h1 > y2;
+      }
+    }
+
+    // --- SYSTEM 2: Pickup Strategy System ---
+    class PickupSystem {
+      constructor(sim) {
+        this.sim = sim;
+      }
+
+      update(world, dt) {
+        const pickups = world.query('Transform', 'Pickup', 'PaperSprite');
+        const racers = world.query('Transform', 'RacerState', 'Collider');
+
+        for (const pId of pickups) {
+          const pPos = world.getComponent(pId, 'Transform');
+          const pickup = world.getComponent(pId, 'Pickup');
+          const pSprite = world.getComponent(pId, 'PaperSprite');
+
+          if (pickup.spawnDelay > 0) {
+            pickup.spawnDelay -= dt;
+            pSprite.container.alpha = 0.45;
+            continue;
+          }
+          pSprite.container.alpha = 1.0;
+
+          // Gentle floating paper bob
+          pickup.bobPhase += dt * 5;
+          pSprite.container.y = pPos.y + Math.sin(pickup.bobPhase) * 2.5;
+
+          for (const rId of racers) {
+            const rState = world.getComponent(rId, 'RacerState');
+            if (!rState.alive) continue;
+            // Already holding a knife? Skip picking up another knife
+            if (pickup.strategyKey === 'knife' && rState.weapon === 'knife') continue;
+
+            const rPos = world.getComponent(rId, 'Transform');
+            const dist = Math.hypot(rPos.x - pPos.x, rPos.y - pPos.y);
+            if (dist < 22) {
+              const strategy = Registry.get('pickup', pickup.strategyKey);
+              if (strategy) {
+                strategy.onCollect(world, rId, pId, this.sim);
+              }
+              world.destroyEntity(pId);
+              break;
+            }
+          }
+        }
+      }
+    }
+
+    // --- SYSTEM 3: Rising Cyan Hazard Flood System ---
+    class HazardSystem {
+      constructor(sim) {
+        this.sim = sim;
+      }
+
+      update(world, dt) {
+        if (!this.sim.floodActive) return;
+
+        // Advance the cyan flood wave along the track phases
+        this.sim.floodDist += dt * 52;
+        this.sim.drawCyanFlood();
+
+        // Check if any living racer is touched by the cyan flood rectangles
+        const racers = world.query('Transform', 'RacerState', 'Collider');
+        for (const id of racers) {
+          const st = world.getComponent(id, 'RacerState');
+          if (!st.alive) continue;
+          const pos = world.getComponent(id, 'Transform');
+
+          if (this.sim.isPointInFlood(pos.x, pos.y)) {
+            if (st.shield) {
+              st.shield = false;
+              st.invulnTimer = 0.8;
+              this.sim.spawnFloatingText(pos.x, pos.y - 10, 'SHIELD SAVED!', 0x38bdf8);
+            } else if (st.invulnTimer <= 0) {
+              st.alive = false;
+              st.petrifiedBy = 'flood';
+              AudioSys.play('flood_petrify');
+              this.sim.spawnConfetti(pos.x, pos.y, 0x00f5d4, 20);
+              this.sim.spawnFloatingText(pos.x, pos.y - 12, 'CORRUPTED!', 0x94a3b8);
+            }
+          }
+        }
+      }
+    }
+
+    // --- SYSTEM 4: Progress & Live Animated Leaderboard System ---
+    class ProgressSystem {
+      constructor(sim) {
+        this.sim = sim;
+        this.uiThrottle = 0;
+      }
+
+      update(world, dt) {
+        const racers = world.query('Transform', 'RacerState');
+        const waypoints = this.sim.currentMap.waypoints;
+
+        // Compute total path length
+        let totalLen = 0;
+        const segLens = [];
+        for (let i = 0; i < waypoints.length - 1; i++) {
+          const d = Math.hypot(waypoints[i + 1].x - waypoints[i].x, waypoints[i + 1].y - waypoints[i].y);
+          segLens.push(d);
+          totalLen += d;
+        }
+
+        // Update each racer's progress (0..100)
+        for (const id of racers) {
+          const pos = world.getComponent(id, 'Transform');
+          const st = world.getComponent(id, 'RacerState');
+          if (!st.alive || st.progress >= 100) continue;
+
+          let bestDistSq = Infinity;
+          let bestAlong = 0;
+          let accum = 0;
+
+          for (let i = 0; i < waypoints.length - 1; i++) {
+            const A = waypoints[i];
+            const B = waypoints[i + 1];
+            const vx = B.x - A.x;
+            const vy = B.y - A.y;
+            const lenSq = vx * vx + vy * vy || 1;
+            let t = ((pos.x - A.x) * vx + (pos.y - A.y) * vy) / lenSq;
+            t = Math.max(0, Math.min(1, t));
+            const projX = A.x + t * vx;
+            const projY = A.y + t * vy;
+            const dSq = (pos.x - projX) ** 2 + (pos.y - projY) ** 2;
+
+            if (dSq < bestDistSq) {
+              bestDistSq = dSq;
+              bestAlong = accum + t * segLens[i];
+            }
+            accum += segLens[i];
+          }
+
+          const pct = Math.min(99, Math.max(0, Math.floor((bestAlong / totalLen) * 100)));
+          st.progress = pct;
+        }
+
+        // Throttle DOM leaderboard updates to 12fps for smooth layout animations
+        this.uiThrottle += dt;
+        if (this.uiThrottle >= 0.08) {
+          this.uiThrottle = 0;
+          this.sim.updateLeaderboardDOM();
+        }
+      }
+    }
+
+    // --- SYSTEM 5: Paper Cutout Render & Juicy VFX System ---
+    class RenderSystem {
+      constructor(sim) {
+        this.sim = sim;
+      }
+
+      update(world, dt) {
+        const racers = world.query('Transform', 'Velocity', 'RacerState', 'PaperSprite', 'Collider');
+
+        for (const id of racers) {
+          const pos = world.getComponent(id, 'Transform');
+          const vel = world.getComponent(id, 'Velocity');
+          const st = world.getComponent(id, 'RacerState');
+          const sp = world.getComponent(id, 'PaperSprite');
+          const col = world.getComponent(id, 'Collider');
+
+          sp.container.x = pos.x;
+          sp.container.y = pos.y;
+
+          // Spring back squash-and-stretch to 1.0
+          sp.scaleX += (1.0 - sp.scaleX) * Math.min(1, dt * 16);
+          sp.scaleY += (1.0 - sp.scaleY) * Math.min(1, dt * 16);
+          sp.bodyContainer.scale.set(sp.scaleX, sp.scaleY);
+
+          // Record history for paper motion smear / tail (exact match to video's pointed tails!)
+          if (st.alive) {
+            sp.trail.unshift({ x: pos.x, y: pos.y });
+            if (sp.trail.length > 7) sp.trail.pop();
+          } else {
+            sp.trail.length = 0;
+          }
+
+          this.drawRacerPaperVisuals(sp, pos, vel, st, col.size);
+        }
+
+        // Update Gate Hit Flashes
+        const gates = world.query('Transform', 'Gate', 'PaperSprite');
+        for (const gId of gates) {
+          const gate = world.getComponent(gId, 'Gate');
+          const sp = world.getComponent(gId, 'PaperSprite');
+          if (gate.hitFlash > 0) {
+            gate.hitFlash = Math.max(0, gate.hitFlash - dt * 6);
+            sp.container.scale.set(1 + gate.hitFlash * 0.06);
+          } else {
+            sp.container.scale.set(1);
+          }
+        }
+      }
+
+      drawRacerPaperVisuals(sp, pos, vel, st, size) {
+        const half = size / 2;
+        const g = sp.graphics;
+        g.clear();
+
+        // 1. Directional Motion Tail / Smear (Like the comet-like paper tails in the video!)
+        if (st.alive && sp.trail.length >= 3) {
+          const tailPt = sp.trail[sp.trail.length - 1];
+          const dx = tailPt.x - pos.x;
+          const dy = tailPt.y - pos.y;
+          const dist = Math.hypot(dx, dy);
+          if (dist > 3) {
+            const nx = -dy / dist;
+            const ny = dx / dist;
+            const tailColor = st.speedBoostTimer > 0
+              ? (Math.floor(performance.now() / 60) % 2 === 0 ? 0xfacc15 : 0xffffff)
+              : st.team.hex;
+
+            g.lineStyle(0);
+            g.beginFill(tailColor, 0.88);
+            g.moveTo(nx * (half - 1), ny * (half - 1));
+            g.lineTo(dx * 1.35, dy * 1.35);
+            g.lineTo(-nx * (half - 1), -ny * (half - 1));
+            g.closePath();
+            g.endFill();
+          }
+        }
+
+        // 2. Drop Shadow (Stacked construction paper depth)
+        g.lineStyle(0);
+        g.beginFill(0x0f172a, 0.35);
+        g.drawRoundedRect(-half + 2.5, -half + 3, size, size, 2);
+        g.endFill();
+
+        // 3. Main Square Cutout Body
+        const fillHex = st.alive
+          ? st.team.hex
+          : (st.petrifiedBy === 'knife' ? 0x78716c : 0x475569);
+
+        // Shield Halo
+        if (st.alive && st.shield) {
+          g.lineStyle(2.5, 0x38bdf8, 0.95);
+          g.beginFill(0x38bdf8, 0.2);
+          g.drawRoundedRect(-half - 3.5, -half - 3.5, size + 7, size + 7, 4);
+          g.endFill();
+        }
+
+        g.lineStyle(2, 0x0f172a, 1);
+        g.beginFill(fillHex);
+        g.drawRoundedRect(-half, -half, size, size, 2);
+        g.endFill();
+
+        // If petrified/sliced, draw stone crack lines like the video's grey blocks
+        if (!st.alive) {
+          g.lineStyle(1.5, 0x1e293b, 0.85);
+          g.moveTo(-half + 3, -half + 2);
+          g.lineTo(-2, 0);
+          g.lineTo(-half + 2, half - 3);
+          g.moveTo(half - 2, -half + 4);
+          g.lineTo(2, 2);
+          g.lineTo(half - 4, half - 2);
+        }
+
+        // 4. Expressive Cutout Eyes (2 Square White Eyes + Tracking Black Pupils)
+        const eyeY = -2.5;
+        const leftEyeX = -4.2;
+        const rightEyeX = 2.8;
+        const eyeW = 5.2;
+        const eyeH = 5.8;
+
+        if (st.alive) {
+          // White sclera boxes
+          g.lineStyle(1.2, 0x0f172a, 1);
+          g.beginFill(0xffffff);
+          g.drawRect(leftEyeX - eyeW / 2, eyeY - eyeH / 2, eyeW, eyeH);
+          g.drawRect(rightEyeX - eyeW / 2, eyeY - eyeH / 2, eyeW, eyeH);
+          g.endFill();
+
+          // Pupils look toward velocity vector
+          const spd = Math.hypot(vel.vx, vel.vy) || 1;
+          const px = (vel.vx / spd) * 1.3;
+          const py = (vel.vy / spd) * 1.3;
+          g.lineStyle(0);
+          g.beginFill(0x0f172a);
+          g.drawRect(leftEyeX - 1.3 + px, eyeY - 1.3 + py, 2.8, 2.8);
+          g.drawRect(rightEyeX - 1.3 + px, eyeY - 1.3 + py, 2.8, 2.8);
+          g.endFill();
+        } else {
+          // Dead / Petrified dark eye sockets
+          g.lineStyle(1.2, 0x0f172a, 1);
+          g.beginFill(0x1e293b);
+          g.drawRect(leftEyeX - 2.2, eyeY - 2.2, 4.4, 4.4);
+          g.drawRect(rightEyeX - 2.2, eyeY - 2.2, 4.4, 4.4);
+          g.endFill();
+        }
+
+        // 5. Equipped Rotating Paper Knife!
+        if (st.alive && st.weapon === 'knife') {
+          const angle = Math.atan2(vel.vy, vel.vx);
+          const kx = Math.cos(angle) * (half + 6);
+          const ky = Math.sin(angle) * (half + 6);
+
+          g.lineStyle(2, 0x0f172a, 1);
+          g.beginFill(0xf8fafc);
+          // Draw blade pointing along movement direction
+          const cos = Math.cos(angle);
+          const sin = Math.sin(angle);
+          const p1x = kx + cos * 14;
+          const p1y = ky + sin * 14;
+          const p2x = kx - sin * 4.5;
+          const p2y = ky + cos * 4.5;
+          const p3x = kx + sin * 4.5;
+          const p3y = ky - cos * 4.5;
+          g.moveTo(p2x, p2y);
+          g.lineTo(p1x, p1y);
+          g.lineTo(p3x, p3y);
+          g.closePath();
+          g.endFill();
+
+          // Knife handle
+          g.beginFill(0x1e293b);
+          g.drawCircle(kx - cos * 3, ky - sin * 3, 3.2);
+          g.endFill();
+        }
+      }
+    }
+
+    /**
+     * ============================================================================
+     * 8. MAIN SIMULATION CONTROLLER (Pixi.js Stage, Particles, Flood, UI)
+     * ============================================================================
+     */
+    class SquareRaceSim {
+      constructor() {
+        this.world = new World();
+        this.currentMapKey = 'classic_serpentine';
+        this.currentMap = Registry.get('map', this.currentMapKey);
+
+        this.paused = false;
+        this.speedMultiplier = 1.0;
+        this.hitStopTimer = 0;
+        this.shakeIntensity = 0;
+        this.winnerDeclared = false;
+
+        this.floodActive = false;
+        this.floodDist = 0;
+
+        this.particles = [];
+        this.floatingTexts = [];
+
+        this.initPixi();
+        this.initSystems();
+        this.bindUI();
+        this.loadRace(this.currentMapKey);
+      }
+
+      initPixi() {
+        const wrapper = document.getElementById('canvasWrapper');
+        this.app = new PIXI.Application({
+          width: VIRTUAL_W,
+          height: VIRTUAL_H,
+          backgroundAlpha: 0,
+          antialias: true,
+          resolution: window.devicePixelRatio || 1,
+          autoDensity: true
+        });
+        wrapper.appendChild(this.app.view);
+
+        // Responsive scaling inside the blue frame
+        this.app.view.style.width = '100%';
+        this.app.view.style.height = '100%';
+        this.app.view.style.objectFit = 'contain';
+
+        // Layered Containers for Paper Cutout Depth
+        this.rootStage = new PIXI.Container();
+        this.app.stage.addChild(this.rootStage);
+
+        this.trackShadowLayer = new PIXI.Graphics();
+        this.trackBorderLayer = new PIXI.Graphics();
+        this.trackFloorLayer  = new PIXI.Graphics();
+        this.splatterLayer    = new PIXI.Graphics(); // Persistent paper ink splatters on floor!
+        this.floodLayer       = new PIXI.Graphics();
+        this.finishLayer      = new PIXI.Graphics();
+        this.gateLayer        = new PIXI.Container();
+        this.pickupLayer      = new PIXI.Container();
+        this.racerLayer       = new PIXI.Container();
+        this.vfxLayer         = new PIXI.Graphics();
+        this.textLayer        = new PIXI.Container();
+
+        this.rootStage.addChild(
+          this.trackShadowLayer,
+          this.trackBorderLayer,
+          this.trackFloorLayer,
+          this.splatterLayer,
+          this.floodLayer,
+          this.finishLayer,
+          this.gateLayer,
+          this.pickupLayer,
+          this.racerLayer,
+          this.vfxLayer,
+          this.textLayer
+        );
+
+        // Click on the track to drop a bonus Cherry Clone or Knife!
+        this.app.view.addEventListener('pointerdown', (e) => {
+          AudioSys.init();
+          const rect = this.app.view.getBoundingClientRect();
+          const scaleX = VIRTUAL_W / rect.width;
+          const scaleY = VIRTUAL_H / rect.height;
+          const x = (e.clientX - rect.left) * scaleX;
+          const y = (e.clientY - rect.top) * scaleY;
+
+          if (this.isBoxInsideTrack(x, y, 8)) {
+            const types = ['cherry_clone', 'knife', 'star_dash', 'shield'];
+            const chosen = types[Math.floor(Math.random() * 2)]; // Mostly cherries or knives!
+            this.spawnPickup(chosen, x, y, 0.1);
+            this.spawnConfetti(x, y, 0xffffff, 10);
+            AudioSys.play('cherry_clone');
+          }
+        });
+
+        this.app.ticker.add((delta) => {
+          this.tick(delta / 60);
+        });
+      }
+
+      initSystems() {
+        this.world.addSystem(new PhysicsSystem(this));
+        this.world.addSystem(new PickupSystem(this));
+        this.world.addSystem(new HazardSystem(this));
+        this.world.addSystem(new ProgressSystem(this));
+        this.world.addSystem(new RenderSystem(this));
+      }
+
+      loadRace(mapKey) {
+        this.currentMapKey = mapKey;
+        this.currentMap = Registry.get('map', mapKey);
+        this.world.clear();
+
+        this.particles = [];
+        this.floatingTexts.forEach(ft => ft.textObj.destroy());
+        this.floatingTexts = [];
+        this.splatterLayer.clear();
+        this.floodLayer.clear();
+        this.vfxLayer.clear();
+
+        this.floodActive = false;
+        this.floodDist = 0;
+        this.winnerDeclared = false;
+        document.getElementById('winBanner').classList.add('hidden');
+
+        this.drawPaperTrack();
+
+        // Spawn Gates
+        for (const gDef of this.currentMap.gates) {
+          this.spawnGate(gDef);
+        }
+
+        // Spawn Pickups
+        for (const pDef of this.currentMap.pickups) {
+          this.spawnPickup(pDef.type, pDef.x, pDef.y, 0);
+        }
+
+        // Spawn 8 Iconic Colored Square Racers in the 4 Starting Bays
+        const spawns = this.currentMap.baySpawns;
+        const bayOrder = ['cyan', 'red', 'yellow', 'green', 'magenta', 'blue', 'orange', 'purple'];
+        bayOrder.forEach((teamId, idx) => {
+          const team = TEAMS.find(t => t.id === teamId);
+          const sp = spawns[idx];
+          this.spawnRacer(team, sp.x, sp.y, sp.vx, sp.vy);
+        });
+
+        this.updateLeaderboardDOM();
+      }
+
+      drawPaperTrack() {
+        this.trackShadowLayer.clear();
+        this.trackBorderLayer.clear();
+        this.trackFloorLayer.clear();
+        this.finishLayer.clear();
+
+        const corridors = this.currentMap.corridors;
+
+        // 1. Dark Paper Cutout Drop Shadow
+        this.trackShadowLayer.beginFill(0x0f172a, 0.35);
+        for (const c of corridors) {
+          this.trackShadowLayer.drawRect(c.x + 5, c.y + 6, c.w, c.h);
+        }
+        this.trackShadowLayer.endFill();
+
+        // 2. Crisp Black Outer Cutout Outline (3px larger than corridors)
+        this.trackBorderLayer.beginFill(0x0f172a);
+        for (const c of corridors) {
+          this.trackBorderLayer.drawRect(c.x - 3, c.y - 3, c.w + 6, c.h + 6);
+        }
+        this.trackBorderLayer.endFill();
+
+        // 3. Bright White Paper Track Interior + Subtle Inner Depth Shadow
+        this.trackFloorLayer.beginFill(0xcbd5e1);
+        for (const c of corridors) {
+          this.trackFloorLayer.drawRect(c.x, c.y, c.w, c.h);
+        }
+        this.trackFloorLayer.endFill();
+
+        this.trackFloorLayer.beginFill(0xf8fafc);
+        for (const c of corridors) {
+          this.trackFloorLayer.drawRect(c.x + 3, c.y + 3, c.w - 3, c.h - 3);
+        }
+        this.trackFloorLayer.endFill();
+
+        // 4. Green & Checkered Finish Alcove at the Top (Exact match to video!)
+        const fz = this.currentMap.finishZone;
+        this.finishLayer.beginFill(0x4ade80);
+        this.finishLayer.drawRect(fz.x, fz.y, fz.w, fz.h - 14);
+        this.finishLayer.endFill();
+
+        // 2-Row Black & White Checkered Finish Line
+        const cols = 6;
+        const cellW = fz.w / cols;
+        const cellH = 7;
+        const startY = fz.y + fz.h - 14;
+        for (let r = 0; r < 2; r++) {
+          for (let c = 0; c < cols; c++) {
+            this.finishLayer.beginFill((r + c) % 2 === 0 ? 0x0f172a : 0xffffff);
+            this.finishLayer.drawRect(fz.x + c * cellW, startY + r * cellH, cellW, cellH);
+            this.finishLayer.endFill();
+          }
+        }
+      }
+
+      spawnRacer(team, x, y, vx, vy) {
+        const id = this.world.createEntity();
+        const size = 20;
+
+        this.world.addComponent(id, 'Transform', { x, y });
+        this.world.addComponent(id, 'Velocity', { vx, vy });
+        this.world.addComponent(id, 'Collider', { size });
+        this.world.addComponent(id, 'RacerState', {
+          team,
+          alive: true,
+          progress: 0,
+          weapon: null,
+          weaponCooldown: 0,
+          shield: false,
+          speedBoostTimer: 0,
+          invulnTimer: 0.2,
+          petrifiedBy: null
+        });
+
+        const container = new PIXI.Container();
+        container.x = x;
+        container.y = y;
+
+        const bodyContainer = new PIXI.Container();
+        const graphics = new PIXI.Graphics();
+        bodyContainer.addChild(graphics);
+        container.addChild(bodyContainer);
+        this.racerLayer.addChild(container);
+
+        this.world.addComponent(id, 'PaperSprite', {
+          container,
+          bodyContainer,
+          graphics,
+          scaleX: 1,
+          scaleY: 1,
+          trail: []
+        });
+
+        return id;
+      }
+
+      spawnGate(gDef) {
+        const id = this.world.createEntity();
+        this.world.addComponent(id, 'Transform', { x: gDef.x, y: gDef.y });
+        this.world.addComponent(id, 'Gate', {
+          w: gDef.w,
+          h: gDef.h,
+          hp: gDef.hp,
+          maxHp: gDef.hp,
+          color: gDef.color,
+          orientation: gDef.orientation,
+          triggersFlood: !!gDef.triggersFlood,
+          lastHitTime: 0,
+          hitFlash: 0
+        });
+
+        const container = new PIXI.Container();
+        container.x = gDef.x + gDef.w / 2;
+        container.y = gDef.y + gDef.h / 2;
+
+        const g = new PIXI.Graphics();
+        const hw = gDef.w / 2;
+        const hh = gDef.h / 2;
+
+        // Striped Barrier Gate Look (White & Colored Bars like the video)
+        g.lineStyle(2, 0x0f172a, 1);
+        g.beginFill(gDef.color);
+        g.drawRect(-hw, -hh, gDef.w, gDef.h);
+        g.endFill();
+
+        g.lineStyle(0);
+        g.beginFill(0xffffff, 0.92);
+        if (gDef.orientation === 'H') {
+          g.drawRect(-hw + 2, -hh + 3, gDef.w - 4, 3);
+          g.drawRect(-hw + 2, hh - 6, gDef.w - 4, 3);
+        } else {
+          g.drawRect(-hw + 3, -hh + 2, 3, gDef.h - 4);
+        }
+        g.endFill();
+
+        container.addChild(g);
+        this.gateLayer.addChild(container);
+        this.world.addComponent(id, 'PaperSprite', { container, graphics: g });
+      }
+
+      spawnPickup(strategyKey, x, y, spawnDelay = 0) {
+        const strategy = Registry.get('pickup', strategyKey);
+        if (!strategy) return;
+
+        const id = this.world.createEntity();
+        this.world.addComponent(id, 'Transform', { x, y });
+        this.world.addComponent(id, 'Pickup', {
+          strategyKey,
+          bobPhase: Math.random() * Math.PI * 2,
+          spawnDelay
+        });
+
+        const container = new PIXI.Container();
+        container.x = x;
+        container.y = y;
+
+        const g = new PIXI.Graphics();
+        strategy.drawIcon(g);
+        container.addChild(g);
+        this.pickupLayer.addChild(container);
+
+        this.world.addComponent(id, 'PaperSprite', { container, graphics: g });
+        return id;
+      }
+
+      // Checks if a square box (cx, cy, halfSize) is completely inside the union of walkable track corridors
+      isBoxInsideTrack(cx, cy, half) {
+        const eps = 1.5;
+        const pts = [
+          { x: cx - half + eps, y: cy - half + eps },
+          { x: cx + half - eps, y: cy - half + eps },
+          { x: cx - half + eps, y: cy + half - eps },
+          { x: cx + half - eps, y: cy + half - eps },
+          { x: cx,              y: cy }
+        ];
+        const corridors = this.currentMap.corridors;
+        for (let i = 0; i < pts.length; i++) {
+          const p = pts[i];
+          let insideOne = false;
+          for (let j = 0; j < corridors.length; j++) {
+            const c = corridors[j];
+            if (p.x >= c.x && p.x <= c.x + c.w && p.y >= c.y && p.y <= c.y + c.h) {
+              insideOne = true;
+              break;
+            }
+          }
+          if (!insideOne) return false;
+        }
+        return true;
+      }
+
+      // Renders the advancing Cyan Flood that fills the bays and serpentines behind the racers!
+      drawCyanFlood() {
+        this.floodLayer.clear();
+        const d = this.floodDist;
+        if (d <= 0) return;
+
+        this.floodRects = [];
+
+        // 1. Fill the 4 Starting Bays from Left to Right (d: 0 -> 130)
+        const bayFill = Math.min(130, d);
+        if (bayFill > 0) {
+          [375, 455, 535, 615].forEach(by => {
+            this.floodRects.push({ x: 45, y: by, w: bayFill, h: 48 });
+          });
+        }
+
+        // 2. Fill Central Vertical Chute (d: 60 -> 480)
+        if (d > 60) {
+          const chuteH = Math.min(535, (d - 60) * 1.45);
+          this.floodRects.push({ x: 175, y: 750 - chuteH, w: 70, h: chuteH });
+        }
+
+        // 3. Fill Top-Mid Bridge & Downward Mid Chute (d: 430 -> 860)
+        if (d > 430) {
+          const bridgeW = Math.min(170, (d - 430) * 1.5);
+          this.floodRects.push({ x: 175, y: 215, w: bridgeW, h: 70 });
+        }
+        if (d > 520) {
+          const downH = Math.min(535, (d - 520) * 1.5);
+          this.floodRects.push({ x: 275, y: 215, w: 70, h: downH });
+        }
+
+        // 4. Fill Bottom Bridge & Right Upward Straightaway (d: 880 -> 1400)
+        if (d > 880) {
+          const botW = Math.min(180, (d - 880) * 1.5);
+          this.floodRects.push({ x: 275, y: 685, w: botW, h: 65 });
+        }
+        if (d > 980) {
+          const upH = Math.min(630, (d - 980) * 1.5);
+          this.floodRects.push({ x: 400, y: 750 - upH, w: 55, h: upH });
+        }
+
+        // 5. Fill Top Horizontal Straightaway toward the Knife Chamber (d: 1400+)
+        if (d > 1400) {
+          const topW = Math.min(280, (d - 1400) * 1.2);
+          this.floodRects.push({ x: 455 - topW, y: 120, w: topW, h: 55 });
+        }
+
+        // Render vibrant cyan fill (`#00f5ff`)
+        this.floodLayer.beginFill(0x06f9f9, 0.95);
+        for (const r of this.floodRects) {
+          this.floodLayer.drawRect(r.x, r.y, r.w, r.h);
+        }
+        this.floodLayer.endFill();
+      }
+
+      isPointInFlood(x, y) {
+        if (!this.floodRects) return false;
+        for (let i = 0; i < this.floodRects.length; i++) {
+          const r = this.floodRects[i];
+          if (x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h) {
+            return true;
+          }
+        }
+        return false;
+      }
+
+      // Persistent paper ink/paint splatter on floor when a racer gets sliced by the knife!
+      spawnInkSplatter(x, y, colorHex) {
+        this.splatterLayer.beginFill(colorHex, 0.85);
+        this.splatterLayer.drawCircle(x, y, 13);
+        for (let i = 0; i < 16; i++) {
+          const ang = Math.random() * Math.PI * 2;
+          const dist = 6 + Math.random() * 24;
+          const rad = 2 + Math.random() * 5.5;
+          this.splatterLayer.drawCircle(x + Math.cos(ang) * dist, y + Math.sin(ang) * dist, rad);
+        }
+        this.splatterLayer.endFill();
+      }
+
+      spawnConfetti(x, y, colorHex, count = 16) {
+        for (let i = 0; i < count; i++) {
+          const ang = Math.random() * Math.PI * 2;
+          const spd = 40 + Math.random() * 160;
+          this.particles.push({
+            x,
+            y,
+            vx: Math.cos(ang) * spd,
+            vy: Math.sin(ang) * spd - 30,
+            size: 3.5 + Math.random() * 4.5,
+            color: colorHex,
+            life: 0.45 + Math.random() * 0.35,
+            maxLife: 0.8
+          });
+        }
+      }
+
+      spawnFloatingText(x, y, message, colorHex) {
+        const style = new PIXI.TextStyle({
+          fontFamily: 'Fredoka',
+          fontSize: 13,
+          fontWeight: '800',
+          fill: colorHex,
+          stroke: '#0f172a',
+          strokeThickness: 3.5,
+          dropShadow: true,
+          dropShadowColor: '#0f172a',
+          dropShadowDistance: 2
+        });
+        const textObj = new PIXI.Text(message, style);
+        textObj.anchor.set(0.5);
+        textObj.x = x;
+        textObj.y = y;
+        this.textLayer.addChild(textObj);
+
+        this.floatingTexts.push({
+          textObj,
+          vy: -42,
+          life: 0.85
+        });
+      }
+
+      triggerHitStop(duration) {
+        this.hitStopTimer = Math.max(this.hitStopTimer, duration);
+      }
+
+      addScreenShake(amount) {
+        this.shakeIntensity = Math.min(14, this.shakeIntensity + amount);
+      }
+
+      declareWinner(team) {
+        this.winnerDeclared = true;
+        AudioSys.play('win_fanfare');
+        this.addScreenShake(10);
+
+        const fz = this.currentMap.finishZone;
+        this.spawnConfetti(fz.x + fz.w / 2, fz.y + fz.h / 2, team.hex, 55);
+        this.spawnConfetti(fz.x + fz.w / 2, fz.y + fz.h / 2, 0xfacc15, 35);
+
+        const banner = document.getElementById('winBanner');
+        const winText = document.getElementById('winText');
+        banner.classList.remove('hidden');
+        winText.textContent = `${team.name} REACHED 100%!`;
+        winText.style.color = team.css;
+      }
+
+      // Live Animated Bottom Leaderboard (8 Cards sorted by live max progress of each team)
+      updateLeaderboardDOM() {
+        const bar = document.getElementById('leaderboardBar');
+        const racers = this.world.query('RacerState');
+
+        // Aggregate stats per team
+        const stats = TEAMS.map(team => {
+          let maxProgress = 0;
+          let anyAlive = false;
+          let aliveCount = 0;
+
+          for (const id of racers) {
+            const st = this.world.getComponent(id, 'RacerState');
+            if (st.team.id === team.id) {
+              if (st.progress > maxProgress) maxProgress = st.progress;
+              if (st.alive) {
+                anyAlive = true;
+                aliveCount++;
+              }
+            }
+          }
+          return { team, maxProgress, anyAlive, aliveCount };
+        });
+
+        // Sort: Alive teams & higher progress first (just like the video!)
+        stats.sort((a, b) => {
+          if (b.maxProgress !== a.maxProgress) return b.maxProgress - a.maxProgress;
+          if (a.anyAlive !== b.anyAlive) return a.anyAlive ? -1 : 1;
+          return 0;
+        });
+
+        bar.innerHTML = stats.map(item => {
+          const bg = item.anyAlive ? item.team.css : '#64748b';
+          const badge = item.aliveCount > 1 ? `<span class="text-[9px] bg-black/40 px-1 rounded">x${item.aliveCount}</span>` : '';
+          return `
+            <div class="leader-card flex items-center justify-between px-1.5 py-1 rounded text-white" style="background-color: ${bg}; opacity: ${item.anyAlive ? '1' : '0.72'}">
+              <!-- Mini Paper Square Icon with Eyes -->
+              <div class="w-3.5 h-3.5 border border-black rounded-[2px] flex items-center justify-center gap-[1px] shrink-0 shadow-sm" style="background-color: ${item.anyAlive ? item.team.css : '#475569'}">
+                <div class="w-1 h-1 bg-white"></div>
+                <div class="w-1 h-1 bg-white"></div>
+              </div>
+              <div class="flex flex-col items-end leading-none">
+                <span class="mono-num font-extrabold text-[11px] sm:text-xs drop-shadow-[1px_1px_0px_#000]">${item.maxProgress}</span>
+                ${badge}
+              </div>
+            </div>
+          `;
+        }).join('');
+      }
+
+      tick(rawDt) {
+        if (this.paused) return;
+
+        let dt = Math.min(0.033, rawDt) * this.speedMultiplier;
+
+        // Micro Hit-Stop Freeze Frame on Knife Kills
+        if (this.hitStopTimer > 0) {
+          this.hitStopTimer -= rawDt;
+          dt *= 0.08;
+        }
+
+        this.world.update(dt);
+
+        // Update Confetti Particles
+        this.vfxLayer.clear();
+        for (let i = this.particles.length - 1; i >= 0; i--) {
+          const p = this.particles[i];
+          p.life -= rawDt;
+          if (p.life <= 0) {
+            this.particles.splice(i, 1);
+            continue;
+          }
+          p.x += p.vx * rawDt;
+          p.y += p.vy * rawDt;
+          p.vy += 260 * rawDt; // Gravity
+
+          const alpha = Math.min(1, p.life / 0.25);
+          this.vfxLayer.lineStyle(1, 0x0f172a, alpha);
+          this.vfxLayer.beginFill(p.color, alpha);
+          this.vfxLayer.drawRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size);
+          this.vfxLayer.endFill();
+        }
+
+        // Update Floating Popups
+        for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
+          const ft = this.floatingTexts[i];
+          ft.life -= rawDt;
+          if (ft.life <= 0) {
+            ft.textObj.destroy();
+            this.floatingTexts.splice(i, 1);
+            continue;
+          }
+          ft.textObj.y += ft.vy * rawDt;
+          ft.textObj.alpha = Math.min(1, ft.life * 2.2);
+        }
+
+        // Update Screen Shake
+        if (this.shakeIntensity > 0.1) {
+          this.rootStage.x = (Math.random() - 0.5) * this.shakeIntensity;
+          this.rootStage.y = (Math.random() - 0.5) * this.shakeIntensity;
+          this.shakeIntensity *= 0.85;
+        } else {
+          this.rootStage.x = 0;
+          this.rootStage.y = 0;
+          this.shakeIntensity = 0;
+        }
+      }
+
+      bindUI() {
+        document.getElementById('mapSelect').addEventListener('change', (e) => {
+          AudioSys.init();
+          this.loadRace(e.target.value);
+        });
+
+        document.getElementById('btnRestart').addEventListener('click', () => {
+          AudioSys.init();
+          this.loadRace(this.currentMapKey);
+        });
+
+        const btnPause = document.getElementById('btnPause');
+        btnPause.addEventListener('click', () => {
+          AudioSys.init();
+          this.paused = !this.paused;
+          btnPause.textContent = this.paused ? '▶ Play' : '⏸ Pause';
+        });
+
+        const btnSpeed = document.getElementById('btnSpeed');
+        const speeds = [0.5, 1.0, 1.5, 2.0];
+        let sIdx = 1;
+        btnSpeed.addEventListener('click', () => {
+          AudioSys.init();
+          sIdx = (sIdx + 1) % speeds.length;
+          this.speedMultiplier = speeds[sIdx];
+          btnSpeed.textContent = `${this.speedMultiplier.toFixed(1)}x`;
+        });
+
+        const btnAudio = document.getElementById('btnAudio');
+        btnAudio.addEventListener('click', () => {
+          AudioSys.init();
+          AudioSys.enabled = !AudioSys.enabled;
+          btnAudio.textContent = AudioSys.enabled ? '🔊 SFX: ON' : '🔇 SFX: OFF';
+        });
+
+        // Chaos Spawner Buttons
+        document.querySelectorAll('.spawn-btn').forEach(btn => {
+          btn.addEventListener('click', () => {
+            AudioSys.init();
+            const type = btn.getAttribute('data-spawn');
+            // Find the leading alive racer and spawn the item slightly ahead of them, or in key chambers!
+            const dropSpots = [
+              { x: 210, y: 255 },
+              { x: 310, y: 420 },
+              { x: 428, y: 360 },
+              { x: 105, y: 240 }
+            ];
+            const spot = dropSpots[Math.floor(Math.random() * dropSpots.length)];
+            const rx = spot.x + (Math.random() - 0.5) * 26;
+            const ry = spot.y + (Math.random() - 0.5) * 26;
+            this.spawnPickup(type, rx, ry, 0.05);
+            this.spawnConfetti(rx, ry, 0xfacc15, 12);
+            AudioSys.play('cherry_clone');
+          });
+        });
+
+        // 2x Clone Wave Button
+        document.getElementById('btnCloneWave').addEventListener('click', () => {
+          AudioSys.init();
+          const racers = this.world.query('Transform', 'Velocity', 'RacerState');
+          let cloned = 0;
+          // Cap total entities so performance stays 60fps
+          if (racers.length > 48) return;
+          for (const id of racers) {
+            const st = this.world.getComponent(id, 'RacerState');
+            if (!st.alive) continue;
+            const pos = this.world.getComponent(id, 'Transform');
+            const vel = this.world.getComponent(id, 'Velocity');
+            this.spawnRacer(st.team, pos.x, pos.y, -vel.vx, vel.vy);
+            this.spawnConfetti(pos.x, pos.y, st.team.hex, 8);
+            cloned++;
+          }
+          if (cloned > 0) {
+            AudioSys.play('cherry_clone');
+            this.addScreenShake(4);
+          }
+        });
+      }
+    }
+
+    window.onload = () => {
+      window.sim = new SquareRaceSim();
+    };
+  </script>
+</body>
+</html>

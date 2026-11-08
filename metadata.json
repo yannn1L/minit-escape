@@ -1,0 +1,8 @@
+{
+  "name": "Minit Escape",
+  "description": "A high-speed physics-driven paper-craft square racer featuring modular ECS, Strategy Registry, Track Builder, and procedural sound synthesizer.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
