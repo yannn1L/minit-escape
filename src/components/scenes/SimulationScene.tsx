@@ -249,21 +249,17 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
           {/* Dynamic Arena Stage: Fits chosen Aspect Ratio (1:1, 16:9, 4:3, or Full Auto) */}
           <div
             ref={stageRef}
-            className="relative flex-1 w-full min-h-0 flex items-center justify-center overflow-hidden"
+            className="relative flex-1 w-full h-full min-h-0 flex items-center justify-center overflow-hidden"
           >
-            {fittedCanvasBox ? (
-              <div
-                style={{
-                  width: `${fittedCanvasBox.width}px`,
-                  height: `${fittedCanvasBox.height}px`,
-                }}
-                className="relative flex flex-col items-center justify-center shadow-[0_4px_16px_rgba(15,23,42,0.35)] rounded-lg overflow-hidden"
-              >
-                <GameCanvas simulation={simulation} />
-              </div>
-            ) : (
+            <div
+              style={{
+                width: fittedCanvasBox ? `${fittedCanvasBox.width}px` : '100%',
+                height: fittedCanvasBox ? `${fittedCanvasBox.height}px` : '100%',
+              }}
+              className="relative flex flex-col items-center justify-center shadow-[0_4px_16px_rgba(15,23,42,0.35)] rounded-lg overflow-hidden"
+            >
               <GameCanvas simulation={simulation} />
-            )}
+            </div>
           </div>
 
           {/* Default Bottom Racers List (when configured to 'bottom') */}

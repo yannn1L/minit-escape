@@ -19,8 +19,9 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ simulation }) => {
 
     const updateCanvasResolution = () => {
       const rect = container.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      const aspect = rect.width / rect.height;
+      const width = rect.width > 0 ? rect.width : container.clientWidth || 500;
+      const height = rect.height > 0 ? rect.height : container.clientHeight || 800;
+      const aspect = width / Math.max(1, height);
 
       // Keep world scale consistent while matching exact container aspect ratio
       let vW = 500;
@@ -37,13 +38,13 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ simulation }) => {
 
       simulation.virtualWidth = vW;
       simulation.virtualHeight = vH;
-      simulation.containerCssWidth = rect.width;
-      simulation.containerCssHeight = rect.height;
+      simulation.containerCssWidth = width;
+      simulation.containerCssHeight = height;
       simulation.syncCanvasBufferResolution();
     };
 
-    updateCanvasResolution();
     simulation.attachCanvas(canvas);
+    updateCanvasResolution();
 
     const resizeObserver = new ResizeObserver(() => {
       updateCanvasResolution();
@@ -168,7 +169,8 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ simulation }) => {
   return (
     <div
       ref={containerRef}
-      className="relative w-full flex-1 min-h-0 flex items-center justify-center overflow-hidden rounded-lg border-2 border-slate-900/30"
+      style={{ width: '100%', height: '100%' }}
+      className="relative w-full h-full flex-1 min-h-0 overflow-hidden rounded-lg border-2 border-slate-900/30"
     >
       <canvas
         ref={canvasRef}
@@ -176,6 +178,7 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ simulation }) => {
         onPointerMove={handlePointerMove}
         onPointerUp={handlePointerUp}
         onPointerCancel={() => { dragStartRef.current = null; }}
+        style={{ width: '100%', height: '100%', display: 'block' }}
         className={`w-full h-full block select-none touch-none ${
           isManualCam ? 'cursor-grab active:cursor-grabbing' : 'cursor-pointer'
         }`}

@@ -125,13 +125,12 @@ export class RaceSimulation {
 
   attachCanvas(canvas: HTMLCanvasElement): void {
     this.canvas = canvas;
-    this.ctx =
-      canvas.getContext('2d', { alpha: false, desynchronized: true }) ||
-      canvas.getContext('2d');
+    this.ctx = canvas.getContext('2d');
     this.adaptiveDprScale = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
     this.smoothedFrameMs = 16.6;
     this.slowFrameStreak = 0;
     this.fastFrameStreak = 0;
+    this.syncCanvasBufferResolution();
     this.loadRace(this.currentMapKey, this.currentMap);
     this.startLoop();
   }
@@ -143,14 +142,16 @@ export class RaceSimulation {
   }
 
   public syncCanvasBufferResolution(): void {
-    if (!this.canvas || this.containerCssWidth <= 0 || this.containerCssHeight <= 0) return;
+    if (!this.canvas) return;
+    const cssW = this.containerCssWidth > 0 ? this.containerCssWidth : this.virtualWidth;
+    const cssH = this.containerCssHeight > 0 ? this.containerCssHeight : this.virtualHeight;
     const targetWidth = Math.max(
       this.virtualWidth,
-      Math.round(this.containerCssWidth * this.adaptiveDprScale)
+      Math.round(cssW * this.adaptiveDprScale)
     );
     const targetHeight = Math.max(
       this.virtualHeight,
-      Math.round(this.containerCssHeight * this.adaptiveDprScale)
+      Math.round(cssH * this.adaptiveDprScale)
     );
     if (this.canvas.width !== targetWidth || this.canvas.height !== targetHeight) {
       this.canvas.width = targetWidth;
