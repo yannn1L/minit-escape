@@ -24,6 +24,7 @@ export const DEFAULT_SYNTH_CONFIG: SynthConfig = {
 
 export class SoundEngine {
   private ctx: AudioContext | null = null;
+  private noiseBuffer: AudioBuffer | null = null;
   public enabled = true;
   public noteIndex = 0;
   private lastBounceTime = 0;
@@ -49,13 +50,33 @@ export class SoundEngine {
   };
 
   init(): void {
-    if (!this.ctx) {
-      const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioCtx) this.ctx = new AudioCtx();
+    try {
+      if (!this.ctx) {
+        const AudioCtx = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioCtx) {
+          this.ctx = new AudioCtx({ latencyHint: 'interactive' });
+        }
+      }
+      if (this.ctx && this.ctx.state === 'suspended') {
+        this.ctx.resume().catch(() => {});
+      }
+    } catch {
+      // Ignore audio init errors on restricted WebViews
     }
-    if (this.ctx && this.ctx.state === 'suspended') {
-      this.ctx.resume();
+  }
+
+  getNoiseBuffer(ctx: AudioContext): AudioBuffer {
+    if (this.noiseBuffer && this.noiseBuffer.sampleRate === ctx.sampleRate) {
+      return this.noiseBuffer;
     }
+    const bufferSize = Math.floor(ctx.sampleRate * 0.18);
+    const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
+    const data = buffer.getChannelData(0);
+    for (let i = 0; i < bufferSize; i++) {
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.05));
+    }
+    this.noiseBuffer = buffer;
+    return buffer;
   }
 
   midiToFreq(midi: number): number {
@@ -64,8 +85,8 @@ export class SoundEngine {
 
   play(strategyKey: string, payload: any = {}): void {
     if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
+    if (!this.ctx) this.init();
+    if (!this.ctx || this.ctx.state !== 'running') return;
 
     const strategy = GlobalRegistry.get<(ctx: AudioContext, engine: SoundEngine, payload: any) => void>(
       'audio',
@@ -77,12 +98,10 @@ export class SoundEngine {
   }
 
   playBounceNote(intensity = 1.0): void {
-    if (!this.enabled) return;
-    this.init();
-    if (!this.ctx) return;
+    if (!this.enabled || !this.ctx || this.ctx.state !== 'running') return;
 
     const now = this.ctx.currentTime;
-    if (now - this.lastBounceTime < 0.04) return;
+    if (now - this.lastBounceTime < 0.065) return;
     this.lastBounceTime = now;
 
     const scale = this.scales[this.config.scaleType] || this.scales.ragtime;
@@ -91,15 +110,12 @@ export class SoundEngine {
     const freq = this.midiToFreq(midi);
 
     const osc1 = this.ctx.createOscillator();
-    const osc2 = this.ctx.createOscillator();
     const gain = this.ctx.createGain();
 
     osc1.type = this.config.waveform;
-    osc2.type = this.config.secondaryWaveform;
     osc1.frequency.setValueAtTime(freq, now);
-    osc2.frequency.setValueAtTime(freq * 2, now);
 
-    const vol = Math.min(0.18, 0.09 * intensity * this.config.volume);
+    const vol = Math.min(0.18, 0.1 * intensity * this.config.volume);
     const decay = this.config.decayTime;
 
     gain.gain.setValueAtTime(0.001, now);
@@ -107,13 +123,15 @@ export class SoundEngine {
     gain.gain.exponentialRampToValueAtTime(0.0008, now + decay);
 
     osc1.connect(gain);
-    osc2.connect(gain);
     gain.connect(this.ctx.destination);
 
+    osc1.onended = () => {
+      osc1.disconnect();
+      gain.disconnect();
+    };
+
     osc1.start(now);
-    osc2.start(now);
-    osc1.stop(now + decay + 0.02);
-    osc2.stop(now + decay + 0.02);
+    osc1.stop(now + decay + 0.015);
   }
 
   resetNoteIndex(): void {
@@ -128,16 +146,10 @@ GlobalRegistry.register('audio', 'bounce_note', (_ctx: AudioContext, engine: Sou
   engine.playBounceNote(intensity);
 });
 
-GlobalRegistry.register('audio', 'gate_break', (ctx: AudioContext) => {
+GlobalRegistry.register('audio', 'gate_break', (ctx: AudioContext, engine: SoundEngine) => {
   const now = ctx.currentTime;
-  const bufferSize = ctx.sampleRate * 0.18;
-  const buffer = ctx.createBuffer(1, bufferSize, ctx.sampleRate);
-  const data = buffer.getChannelData(0);
-  for (let i = 0; i < bufferSize; i++) {
-    data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.05));
-  }
   const noise = ctx.createBufferSource();
-  noise.buffer = buffer;
+  noise.buffer = engine.getNoiseBuffer(ctx);
 
   const filter = ctx.createBiquadFilter();
   filter.type = 'bandpass';
@@ -150,6 +162,11 @@ GlobalRegistry.register('audio', 'gate_break', (ctx: AudioContext) => {
   noise.connect(filter);
   filter.connect(gain);
   gain.connect(ctx.destination);
+  noise.onended = () => {
+    noise.disconnect();
+    filter.disconnect();
+    gain.disconnect();
+  };
   noise.start(now);
 });
 

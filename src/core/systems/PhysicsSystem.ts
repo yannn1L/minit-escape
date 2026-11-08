@@ -89,8 +89,8 @@ export class PhysicsSystem implements ISystem {
       }
     }
 
-    // 8 sub-steps per frame (~0.4px movement per step) guarantees zero tunneling and 60fps on low-end devices
-    const subSteps = 8;
+    // Adaptive sub-steps: 4 steps at 60fps, scaling up to 8 steps on slower frames to prevent tunneling
+    const subSteps = Math.min(8, Math.max(4, Math.ceil(dt / 0.0042)));
     const stepDt = dt / subSteps;
     const corridors = this.sim.currentMap.corridors;
     const fz = this.sim.currentMap.finishZone;

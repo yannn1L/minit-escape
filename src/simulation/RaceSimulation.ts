@@ -123,15 +123,29 @@ export class RaceSimulation {
     this.world.addSystem(new RenderSystem(this));
   }
 
+  private getMaxInitialDpr(): number {
+    if (typeof window === 'undefined') return 1;
+    const ua = typeof navigator !== 'undefined' ? navigator.userAgent || '' : '';
+    const isAndroidWebView = /\bwv\b|Android.*Version\/[\d.]+|WebToApp/i.test(ua);
+    if (isAndroidWebView) return 1.0;
+    const isMobile = /Android|iPhone|iPad|iPod|Mobile/i.test(ua);
+    const rawDpr = window.devicePixelRatio || 1;
+    return isMobile ? Math.min(rawDpr, 1.25) : Math.min(rawDpr, 1.75);
+  }
+
   attachCanvas(canvas: HTMLCanvasElement): void {
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
-    this.adaptiveDprScale = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+    this.adaptiveDprScale = this.getMaxInitialDpr();
     this.smoothedFrameMs = 16.6;
     this.slowFrameStreak = 0;
     this.fastFrameStreak = 0;
     this.syncCanvasBufferResolution();
-    this.loadRace(this.currentMapKey, this.currentMap);
+    if (this.world.query('RacerState').length === 0) {
+      this.loadRace(this.currentMapKey, this.currentMap);
+    } else {
+      this.notifyStatsChanged(true);
+    }
     this.startLoop();
   }
 
@@ -145,14 +159,8 @@ export class RaceSimulation {
     if (!this.canvas) return;
     const cssW = this.containerCssWidth > 0 ? this.containerCssWidth : this.virtualWidth;
     const cssH = this.containerCssHeight > 0 ? this.containerCssHeight : this.virtualHeight;
-    const targetWidth = Math.max(
-      this.virtualWidth,
-      Math.round(cssW * this.adaptiveDprScale)
-    );
-    const targetHeight = Math.max(
-      this.virtualHeight,
-      Math.round(cssH * this.adaptiveDprScale)
-    );
+    const targetWidth = Math.max(300, Math.round(cssW * this.adaptiveDprScale));
+    const targetHeight = Math.max(300, Math.round(cssH * this.adaptiveDprScale));
     if (this.canvas.width !== targetWidth || this.canvas.height !== targetHeight) {
       this.canvas.width = targetWidth;
       this.canvas.height = targetHeight;
@@ -160,38 +168,40 @@ export class RaceSimulation {
   }
 
   startLoop(): void {
+    this.stopLoop();
     this.lastTimestamp = performance.now();
+    const maxDpr = this.getMaxInitialDpr();
     const loop = (timestamp: number) => {
       const deltaMs = timestamp - this.lastTimestamp;
       this.lastTimestamp = timestamp;
 
       // Automatic Adaptive HiDPI Scaling: monitor frame time when active
-      if (!this.paused && deltaMs > 0 && deltaMs < 120) {
-        this.smoothedFrameMs = this.smoothedFrameMs * 0.88 + deltaMs * 0.12;
-        const maxDpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+      if (!this.paused && deltaMs > 0 && deltaMs < 150) {
+        this.smoothedFrameMs = this.smoothedFrameMs * 0.85 + deltaMs * 0.15;
 
-        if (this.smoothedFrameMs > 19.5 && this.adaptiveDprScale > 1.0) {
+        if (this.smoothedFrameMs > 18.5 && this.adaptiveDprScale > 0.75) {
           this.slowFrameStreak++;
           this.fastFrameStreak = 0;
-          if (this.slowFrameStreak >= 24) {
-            this.adaptiveDprScale = Math.max(1.0, Math.round((this.adaptiveDprScale - 0.25) * 100) / 100);
+          if (this.slowFrameStreak >= 12) {
+            this.adaptiveDprScale = Math.max(0.75, Math.round((this.adaptiveDprScale - 0.15) * 100) / 100);
             this.slowFrameStreak = 0;
             this.syncCanvasBufferResolution();
           }
-        } else if (this.smoothedFrameMs < 14.2 && this.adaptiveDprScale < maxDpr) {
+        } else if (this.smoothedFrameMs < 14.0 && this.adaptiveDprScale < maxDpr) {
           this.fastFrameStreak++;
-          this.slowFrameStreak = 0;
-          if (this.fastFrameStreak >= 90) {
-            this.adaptiveDprScale = Math.min(maxDpr, Math.round((this.adaptiveDprScale + 0.25) * 100) / 100);
+          this.slowFrameStreak = Math.max(0, this.slowFrameStreak - 1);
+          if (this.fastFrameStreak >= 120) {
+            this.adaptiveDprScale = Math.min(maxDpr, Math.round((this.adaptiveDprScale + 0.15) * 100) / 100);
             this.fastFrameStreak = 0;
             this.syncCanvasBufferResolution();
           }
         } else {
-          this.slowFrameStreak = 0;
+          this.slowFrameStreak = Math.max(0, this.slowFrameStreak - 1);
         }
       }
 
-      const rawDt = Math.min(0.05, deltaMs / 1000);
+      // Allow up to 65ms (~15 FPS) catch-up so WebView frame drops never cause slow-motion gameplay
+      const rawDt = Math.min(0.065, Math.max(0.001, deltaMs / 1000));
       this.tick(rawDt);
       this.animFrameId = requestAnimationFrame(loop);
     };
@@ -530,18 +540,18 @@ export class RaceSimulation {
   }
 
   spawnInkSplatter(x: number, y: number, colorHex: number): void {
-    if (this.splatters.length > 160) return;
+    if (this.splatters.length > 72) return;
     const colorCss = `#${colorHex.toString(16).padStart(6, '0')}`;
     const mainSplat: Splatter = { x, y, radius: 13, colorCss };
     this.splatters.push(mainSplat);
     this.dirtySplatters.push(mainSplat);
-    for (let i = 0; i < 10; i++) {
+    for (let i = 0; i < 4; i++) {
       const ang = Math.random() * Math.PI * 2;
-      const dist = 6 + Math.random() * 20;
+      const dist = 6 + Math.random() * 18;
       const drop: Splatter = {
         x: x + Math.cos(ang) * dist,
         y: y + Math.sin(ang) * dist,
-        radius: 2 + Math.random() * 4,
+        radius: 2.5 + Math.random() * 3,
         colorCss,
       };
       this.splatters.push(drop);
@@ -673,7 +683,7 @@ export class RaceSimulation {
   tick(rawDt: number): void {
     if (this.paused) return;
 
-    let dt = Math.min(0.033, rawDt) * this.speedMultiplier;
+    let dt = Math.min(0.065, rawDt) * this.speedMultiplier;
 
     if (this.hitStopTimer > 0) {
       this.hitStopTimer -= rawDt;

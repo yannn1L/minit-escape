@@ -6,7 +6,7 @@ interface GameCanvasProps {
   simulation: RaceSimulation;
 }
 
-export const GameCanvas: React.FC<GameCanvasProps> = ({ simulation }) => {
+export const GameCanvas: React.FC<GameCanvasProps> = React.memo(({ simulation }) => {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const dragStartRef = useRef<{ x: number; y: number; moved: boolean } | null>(null);
@@ -190,6 +190,6 @@ export const GameCanvas: React.FC<GameCanvasProps> = ({ simulation }) => {
       />
     </div>
   );
-};
+});
 
 

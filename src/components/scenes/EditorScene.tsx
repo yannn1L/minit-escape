@@ -1587,7 +1587,6 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
               onTouchEnd={handleCanvasTouchEnd}
               onTouchCancel={handleCanvasTouchEnd}
             >
-              <div className="absolute inset-0 bg-[radial-gradient(#1e3a8a_1px,transparent_1px)] [background-size:16px_16px] opacity-20 pointer-events-none"></div>
 
               {/* Collapsible Canvas Floating Toolbar */}
               {!isToolbarOpen ? (
@@ -1831,8 +1830,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
               <svg
                 ref={svgRef}
                 viewBox={dynamicViewBox}
-                shapeRendering="geometricPrecision"
-                textRendering="geometricPrecision"
+                shapeRendering="optimizeSpeed"
                 className={`w-full h-full block select-none touch-none ${
                   editorMode === 'select' ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'
                 }`}
@@ -1842,8 +1840,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                 onPointerCancel={handlePointerUpSVG}
               >
                 <defs>
-                  <pattern id="arenaGridPattern" width="25" height="25" patternUnits="userSpaceOnUse">
-                    <circle cx="2" cy="2" r="1.2" fill="#1e3a8a" opacity="0.25" />
+                  <pattern id="arenaGridPattern" width="32" height="32" patternUnits="userSpaceOnUse">
+                    <rect x="2" y="2" width="2.2" height="2.2" fill="#1e3a8a" opacity="0.22" />
                   </pattern>
                 </defs>
                 {/* Viewport-fitted infinite grid background (avoids 100,000x100,000 SVG pattern rasterization overhead) */}

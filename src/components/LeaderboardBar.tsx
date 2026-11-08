@@ -8,7 +8,7 @@ interface LeaderboardBarProps {
   position?: 'bottom' | 'top';
 }
 
-export const LeaderboardBar: React.FC<LeaderboardBarProps> = ({
+export const LeaderboardBar: React.FC<LeaderboardBarProps> = React.memo(({
   stats,
   styleMode = 'detailed',
   columnsMode = 'auto',
@@ -32,7 +32,7 @@ export const LeaderboardBar: React.FC<LeaderboardBarProps> = ({
       <div
         className={`w-full grid ${gridColsClass} gap-1 bg-[#1e293b] ${
           isCompact ? 'p-0.5 sm:p-1' : 'p-1 sm:p-1.5'
-        } rounded-lg border-2 border-slate-950 shadow-inner`}
+        } rounded-lg border-2 border-slate-950`}
       >
         {stats.map(({ team, maxProgress, anyAlive, aliveCount }) => {
           const bg = anyAlive ? team.css : '#64748b';
@@ -54,7 +54,7 @@ export const LeaderboardBar: React.FC<LeaderboardBarProps> = ({
               key={team.id}
               className={`flex items-center justify-between ${
                 isCompact ? 'px-1 py-0.5' : 'px-1.5 py-0.5 sm:py-1'
-              } rounded text-white border-2 border-slate-950 shadow-[0_2px_0_#000] transition-transform duration-150 min-w-0`}
+              } rounded text-white border-2 border-slate-950 shadow-[0_2px_0_#000] min-w-0`}
               style={{
                 backgroundColor: bg,
                 opacity: anyAlive ? 1 : 0.65,
@@ -66,7 +66,7 @@ export const LeaderboardBar: React.FC<LeaderboardBarProps> = ({
                 <div
                   className={`${
                     isCompact ? 'w-3 h-3' : 'w-3.5 h-3.5'
-                  } border border-black ${shapeClass} flex items-center justify-center gap-[1px] shrink-0 shadow-sm`}
+                  } border border-black ${shapeClass} flex items-center justify-center gap-[1px] shrink-0`}
                   style={{
                     backgroundColor: anyAlive ? team.css : '#475569',
                   }}
@@ -75,7 +75,10 @@ export const LeaderboardBar: React.FC<LeaderboardBarProps> = ({
                   <div className="w-1 h-1 bg-white"></div>
                 </div>
                 {!isCompact && (
-                  <span className="hidden md:inline text-[9px] font-black tracking-tight truncate drop-shadow-[1px_1px_0px_#000]">
+                  <span
+                    style={{ textShadow: '1px 1px 0 #000' }}
+                    className="hidden md:inline text-[9px] font-black tracking-tight truncate"
+                  >
                     {team.name}
                   </span>
                 )}
@@ -84,9 +87,10 @@ export const LeaderboardBar: React.FC<LeaderboardBarProps> = ({
               {/* Progress & Multiplier */}
               <div className="flex items-center gap-0.5 leading-none shrink-0">
                 <span
+                  style={{ textShadow: '1px 1px 0 #000' }}
                   className={`mono-num font-extrabold ${
                     isCompact ? 'text-[9.5px] sm:text-[10.5px]' : 'text-[10px] sm:text-xs'
-                  } drop-shadow-[1px_1px_0px_#000]`}
+                  }`}
                 >
                   {maxProgress}%
                 </span>
@@ -98,5 +102,5 @@ export const LeaderboardBar: React.FC<LeaderboardBarProps> = ({
       </div>
     </div>
   );
-};
+});
 

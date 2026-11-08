@@ -7,17 +7,6 @@ export class RenderSystem implements ISystem {
   name = 'RenderSystem';
   private sim: any;
   private hexCache = new Map<number, string>();
-  private gridPattern: CanvasPattern | null = null;
-  private gridPatternTheme = '';
-  private floodPattern: CanvasPattern | null = null;
-  private barrierStaticPatternH: CanvasPattern | null = null;
-  private barrierMovingPatternH: CanvasPattern | null = null;
-  private barrierStaticPatternV: CanvasPattern | null = null;
-  private barrierMovingPatternV: CanvasPattern | null = null;
-  private trackCanvas: HTMLCanvasElement | null = null;
-  private trackCtx: CanvasRenderingContext2D | null = null;
-  private trackScale = 1.0;
-  private trackBounds = { x: 0, y: 0, w: 0, h: 0, valid: false };
 
   // Camera viewport frustum bounds in world coordinates
   private visMinX = 0;
@@ -47,187 +36,60 @@ export class RenderSystem implements ISystem {
     return '#4895ef';
   }
 
-  private ensureGridPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
-    const themeColor = this.getArenaThemeColor();
-    if (this.gridPattern && this.gridPatternTheme === themeColor) return this.gridPattern;
-    const tile = document.createElement('canvas');
-    tile.width = 32;
-    tile.height = 32;
-    const tCtx = tile.getContext('2d');
-    if (tCtx) {
-      tCtx.fillStyle = themeColor;
-      tCtx.fillRect(0, 0, 32, 32);
-      tCtx.fillStyle = 'rgba(255, 255, 255, 0.16)';
-      tCtx.fillRect(15, 15, 2.4, 2.4);
-      this.gridPattern = ctx.createPattern(tile, 'repeat');
-      this.gridPatternTheme = themeColor;
-    }
-    return this.gridPattern;
-  }
-
-  private ensureFloodPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
-    if (this.floodPattern) return this.floodPattern;
-    const tile = document.createElement('canvas');
-    tile.width = 16;
-    tile.height = 16;
-    const tCtx = tile.getContext('2d');
-    if (tCtx) {
-      tCtx.fillStyle = '#06f9f9';
-      tCtx.fillRect(0, 0, 16, 16);
-      tCtx.fillStyle = 'rgba(15, 23, 42, 0.14)';
-      tCtx.fillRect(0, 0, 8, 16);
-      this.floodPattern = ctx.createPattern(tile, 'repeat');
-    }
-    return this.floodPattern;
-  }
-
-  private ensureBarrierPatterns(ctx: CanvasRenderingContext2D): void {
-    if (this.barrierStaticPatternH) return;
-
-    const makeStripeTile = (horiz: boolean, stripeColor: string): CanvasPattern | null => {
-      const tile = document.createElement('canvas');
-      tile.width = horiz ? 10 : 16;
-      tile.height = horiz ? 16 : 10;
-      const tCtx = tile.getContext('2d');
-      if (!tCtx) return null;
-      tCtx.fillStyle = stripeColor;
-      if (horiz) {
-        tCtx.fillRect(4, 0, 4, 16);
-      } else {
-        tCtx.fillRect(0, 4, 16, 4);
-      }
-      return ctx.createPattern(tile, 'repeat');
-    };
-
-    this.barrierStaticPatternH = makeStripeTile(true, '#e2e8f0');
-    this.barrierMovingPatternH = makeStripeTile(true, '#facc15');
-    this.barrierStaticPatternV = makeStripeTile(false, '#e2e8f0');
-    this.barrierMovingPatternV = makeStripeTile(false, '#facc15');
-  }
-
-  private rebuildTrackCache(): void {
-    const corridors = this.sim.currentMap?.corridors || [];
-    const fz = this.sim.currentMap?.finishZone;
-    if (corridors.length === 0) {
-      this.trackBounds.valid = false;
-      this.sim.trackCacheDirty = false;
-      return;
-    }
-
-    let minX = Infinity;
-    let minY = Infinity;
-    let maxX = -Infinity;
-    let maxY = -Infinity;
-
-    for (let i = 0; i < corridors.length; i++) {
-      const c = corridors[i];
-      if (c.x < minX) minX = c.x;
-      if (c.y < minY) minY = c.y;
-      if (c.x + c.w > maxX) maxX = c.x + c.w;
-      if (c.y + c.h > maxY) maxY = c.y + c.h;
-    }
-
-    if (fz) {
-      const padFz = Math.max(fz.w, fz.h);
-      if (fz.x - padFz < minX) minX = fz.x - padFz;
-      if (fz.y - padFz < minY) minY = fz.y - padFz;
-      if (fz.x + fz.w + padFz > maxX) maxX = fz.x + fz.w + padFz;
-      if (fz.y + fz.h + padFz > maxY) maxY = fz.y + fz.h + padFz;
-    }
-
-    const pad = 16;
-    const x = Math.floor(minX - pad);
-    const y = Math.floor(minY - pad);
-    const w = Math.ceil(maxX - minX + pad * 2);
-    const h = Math.ceil(maxY - minY + pad * 2);
-
-    // Only use offscreen bitmap cache if dimensions fit comfortably in mobile GPU texture memory
-    if (w <= 0 || h <= 0 || w > 2600 || h > 2600) {
-      this.trackBounds.valid = false;
-      this.sim.trackCacheDirty = false;
-      return;
-    }
-
-    if (!this.trackCanvas) {
-      this.trackCanvas = document.createElement('canvas');
-    }
-
-    const scale = w * h <= 900000 ? 1.5 : 1.0;
-    this.trackScale = scale;
-    this.trackCanvas.width = Math.ceil(w * scale);
-    this.trackCanvas.height = Math.ceil(h * scale);
-
-    const tCtx = this.trackCanvas.getContext('2d');
-    if (!tCtx) {
-      this.trackBounds.valid = false;
-      this.sim.trackCacheDirty = false;
-      return;
-    }
-    this.trackCtx = tCtx;
-
-    tCtx.setTransform(scale, 0, 0, scale, 0, 0);
-    tCtx.clearRect(0, 0, w, h);
-    tCtx.translate(-x, -y);
-
-    this.renderTrackGeometry(tCtx);
-
-    // Also stamp any existing splatters onto the freshly built track cache
-    const splatters = this.sim.splatters;
-    for (let i = 0; i < splatters.length; i++) {
-      const s = splatters[i];
-      tCtx.fillStyle = s.colorCss;
-      tCtx.beginPath();
-      tCtx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
-      tCtx.fill();
-    }
-    if (this.sim.dirtySplatters) {
-      this.sim.dirtySplatters.length = 0;
-    }
-
-    this.trackBounds = { x, y, w, h, valid: true };
-    this.sim.trackCacheDirty = false;
+  private isRectVisible(x: number, y: number, w: number, h: number): boolean {
+    return x + w >= this.visMinX && x <= this.visMaxX && y + h >= this.visMinY && y <= this.visMaxY;
   }
 
   private renderTrackGeometry(ctx: CanvasRenderingContext2D): void {
     const corridors = this.sim.currentMap.corridors;
+    const len = corridors.length;
 
-    // Outer Dark Drop Shadow
+    // 1. Outer Dark Drop Shadow (frustum-culled)
     ctx.fillStyle = 'rgba(15, 23, 42, 0.35)';
-    for (let i = 0; i < corridors.length; i++) {
+    for (let i = 0; i < len; i++) {
       const c = corridors[i];
+      if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
       ctx.fillRect(c.x + 5, c.y + 6, c.w, c.h);
     }
 
-    // Crisp Black Outer Cutout Border
+    // 2. Crisp Black Outer Cutout Border
     ctx.fillStyle = '#0f172a';
-    for (let i = 0; i < corridors.length; i++) {
+    for (let i = 0; i < len; i++) {
       const c = corridors[i];
+      if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
       ctx.fillRect(c.x - 3, c.y - 3, c.w + 6, c.h + 6);
     }
 
-    // Inner Paper Bevel
+    // 3. Inner Paper Bevel
     ctx.fillStyle = '#cbd5e1';
-    for (let i = 0; i < corridors.length; i++) {
+    for (let i = 0; i < len; i++) {
       const c = corridors[i];
+      if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
       ctx.fillRect(c.x, c.y, c.w, c.h);
     }
 
-    // Bright White Paper Track Interior
+    // 4. Bright White Paper Track Interior
     ctx.fillStyle = '#f8fafc';
-    for (let i = 0; i < corridors.length; i++) {
+    for (let i = 0; i < len; i++) {
       const c = corridors[i];
+      if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
       ctx.fillRect(c.x + 3, c.y + 3, c.w - 3, c.h - 3);
     }
 
-    // Green Checkered Finish Alcove (supports rotation)
+    // 5. Green Checkered Finish Alcove (supports rotation, frustum-culled)
     const fz = this.sim.currentMap.finishZone;
+    const padFz = Math.max(fz.w, fz.h);
+    if (!this.isRectVisible(fz.x - padFz, fz.y - padFz, fz.w + padFz * 2, fz.h + padFz * 2)) {
+      return;
+    }
+
     const fzCx = fz.x + fz.w / 2;
     const fzCy = fz.y + fz.h / 2;
     const rotRad = ((fz.rotation || 0) * Math.PI) / 180;
 
     ctx.save();
     ctx.translate(fzCx, fzCy);
-    ctx.rotate(rotRad);
+    if (rotRad !== 0) ctx.rotate(rotRad);
     ctx.translate(-fzCx, -fzCy);
 
     // Outer border for finish alcove
@@ -237,22 +99,23 @@ export class RenderSystem implements ISystem {
     ctx.fillStyle = '#4ade80';
     ctx.fillRect(fz.x, fz.y, fz.w, Math.max(4, fz.h - 14));
 
-    // Checkered Finish Line (2 rows)
+    // Checkered Finish Line (2 rows, batched by color)
     const cols = 6;
     const cellW = fz.w / cols;
     const cellH = 7;
     const startY = fz.y + fz.h - 14;
+
+    ctx.fillStyle = '#ffffff';
+    ctx.fillRect(fz.x, startY, fz.w, 14);
+    ctx.fillStyle = '#0f172a';
     for (let r = 0; r < 2; r++) {
       for (let c = 0; c < cols; c++) {
-        ctx.fillStyle = (r + c) % 2 === 0 ? '#0f172a' : '#ffffff';
-        ctx.fillRect(fz.x + c * cellW, startY + r * cellH, cellW, cellH);
+        if ((r + c) % 2 === 0) {
+          ctx.fillRect(fz.x + c * cellW, startY + r * cellH, cellW, cellH);
+        }
       }
     }
     ctx.restore();
-  }
-
-  private isRectVisible(x: number, y: number, w: number, h: number): boolean {
-    return x + w >= this.visMinX && x <= this.visMaxX && y + h >= this.visMinY && y <= this.visMaxY;
   }
 
   update(world: World, dt: number): void {
@@ -265,7 +128,7 @@ export class RenderSystem implements ISystem {
     const physW = canvas ? canvas.width : w;
     const physH = canvas ? canvas.height : h;
 
-    // 1. Reset transform & scale to HiDPI physical pixel buffer
+    // 1. Reset transform & scale to physical pixel buffer
     ctx.setTransform(physW / w, 0, 0, physH / h, 0, 0);
 
     ctx.save();
@@ -286,7 +149,7 @@ export class RenderSystem implements ISystem {
     ctx.scale(camZoom, camZoom);
     ctx.translate(-camX, -camY);
 
-    // 1b. Draw Infinite Paper Grid in a single GPU pattern call & compute frustum bounds
+    // Compute camera frustum bounds in world coordinates
     const visW = w / camZoom + 36;
     const visH = h / camZoom + 36;
     const visX = camX - visW / 2;
@@ -296,40 +159,29 @@ export class RenderSystem implements ISystem {
     this.visMaxX = visX + visW;
     this.visMaxY = visY + visH;
 
-    const pattern = this.ensureGridPattern(ctx);
-    ctx.fillStyle = pattern || '#4895ef';
+    // 1b. Fast Solid Arena Background + Batched Paper Grid Dots (avoids slow WebView CanvasPattern shaders)
+    ctx.fillStyle = this.getArenaThemeColor();
     ctx.fillRect(visX, visY, visW, visH);
 
-    // 2. Draw Track + Persistent Splatters (Single cached drawImage blit when available)
-    if (this.sim.trackCacheDirty) {
-      this.rebuildTrackCache();
-    }
-    if (this.trackBounds.valid && this.trackCanvas) {
-      // Incrementally stamp any new splatters onto the cached track bitmap
-      const dirty = this.sim.dirtySplatters;
-      if (dirty && dirty.length > 0 && this.trackCtx) {
-        const tCtx = this.trackCtx;
-        for (let i = 0; i < dirty.length; i++) {
-          const s = dirty[i];
-          tCtx.fillStyle = s.colorCss;
-          tCtx.beginPath();
-          tCtx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
-          tCtx.fill();
+    if (camZoom >= 0.45) {
+      const gridStep = camZoom < 0.75 ? 64 : 32;
+      const startGX = Math.floor(visX / gridStep) * gridStep + 15;
+      const startGY = Math.floor(visY / gridStep) * gridStep + 15;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.16)';
+      ctx.beginPath();
+      for (let gx = startGX; gx < this.visMaxX; gx += gridStep) {
+        for (let gy = startGY; gy < this.visMaxY; gy += gridStep) {
+          ctx.rect(gx, gy, 2.4, 2.4);
         }
-        dirty.length = 0;
       }
-
-      ctx.drawImage(
-        this.trackCanvas,
-        this.trackBounds.x,
-        this.trackBounds.y,
-        this.trackBounds.w,
-        this.trackBounds.h
-      );
-    } else {
-      this.renderTrackGeometry(ctx);
-      this.drawSplatters(ctx);
+      ctx.fill();
     }
+
+    // 2. Draw Track Corridors directly with frustum culling
+    this.renderTrackGeometry(ctx);
+
+    // 3. Draw Persistent Splatters
+    this.drawSplatters(ctx);
 
     // 4. Draw Cyan Corruption Flood
     this.drawFlood(ctx);
@@ -361,9 +213,13 @@ export class RenderSystem implements ISystem {
       const s = splatters[i];
       if (!this.isRectVisible(s.x - s.radius, s.y - s.radius, s.radius * 2, s.radius * 2)) continue;
       ctx.fillStyle = s.colorCss;
-      ctx.beginPath();
-      ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
-      ctx.fill();
+      if (s.radius <= 6) {
+        ctx.fillRect(s.x - s.radius, s.y - s.radius, s.radius * 2, s.radius * 2);
+      } else {
+        ctx.beginPath();
+        ctx.arc(s.x, s.y, s.radius, 0, Math.PI * 2);
+        ctx.fill();
+      }
     }
   }
 
@@ -372,15 +228,28 @@ export class RenderSystem implements ISystem {
     const rects = this.sim.floodRects;
     if (rects.length === 0) return;
 
-    const pattern = this.ensureFloodPattern(ctx);
-    ctx.fillStyle = pattern || '#06f9f9';
     ctx.lineWidth = 2.5;
     ctx.strokeStyle = '#0f172a';
 
     for (let i = 0; i < rects.length; i++) {
       const r = rects[i];
       if (!this.isRectVisible(r.x, r.y, r.w, r.h)) continue;
+      ctx.fillStyle = '#06f9f9';
       ctx.fillRect(r.x, r.y, r.w, r.h);
+
+      // Subtle inner stripe accent without bitmap shader overhead
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.12)';
+      const step = 16;
+      if (r.w >= r.h) {
+        for (let sx = r.x; sx < r.x + r.w - 4; sx += step) {
+          ctx.fillRect(sx, r.y, Math.min(8, r.x + r.w - sx), r.h);
+        }
+      } else {
+        for (let sy = r.y; sy < r.y + r.h - 4; sy += step) {
+          ctx.fillRect(r.x, sy, r.w, Math.min(8, r.y + r.h - sy));
+        }
+      }
+
       ctx.strokeRect(r.x, r.y, r.w, r.h);
     }
   }
@@ -446,7 +315,6 @@ export class RenderSystem implements ISystem {
   private drawBarriers(world: World, ctx: CanvasRenderingContext2D): void {
     const barriers = world.query('Transform', 'Barrier');
     if (barriers.length === 0) return;
-    this.ensureBarrierPatterns(ctx);
 
     for (let i = 0; i < barriers.length; i++) {
       const id = barriers[i];
@@ -468,19 +336,18 @@ export class RenderSystem implements ISystem {
       ctx.fillStyle = bar.color ? this.getHexCss(bar.color) : '#475569';
       ctx.fillRect(bx, by, bw, bh);
 
-      // GPU-accelerated hazard stripes via repeating CanvasPattern
+      // Fast direct hazard stripes without CanvasPattern shader overhead
       const isHoriz = bw >= bh;
       const isStatic = bar.movement === 'static';
-      const stripePattern = isHoriz
-        ? (isStatic ? this.barrierStaticPatternH : this.barrierMovingPatternH)
-        : (isStatic ? this.barrierStaticPatternV : this.barrierMovingPatternV);
-
-      if (stripePattern && bw > 6 && bh > 6) {
-        ctx.save();
-        ctx.translate(bx, by);
-        ctx.fillStyle = stripePattern;
-        ctx.fillRect(2, 2, bw - 4, bh - 4);
-        ctx.restore();
+      ctx.fillStyle = isStatic ? '#e2e8f0' : '#facc15';
+      if (isHoriz) {
+        for (let sx = bx + 5; sx < bx + bw - 5; sx += 12) {
+          ctx.fillRect(sx, by + 2.5, 4, Math.max(2, bh - 5));
+        }
+      } else {
+        for (let sy = by + 5; sy < by + bh - 5; sy += 12) {
+          ctx.fillRect(bx + 2.5, sy, Math.max(2, bw - 5), 4);
+        }
       }
 
       ctx.strokeStyle = '#0f172a';
