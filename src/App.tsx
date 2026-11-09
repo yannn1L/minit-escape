@@ -20,7 +20,12 @@ export default function App() {
     setCurrentScene('editor');
   }, []);
 
+  const handleSaveWorkspace = useCallback((savedMap: MapData, teams: TeamConfig[]) => {
+    simulation.saveWorkspace(savedMap, teams);
+  }, [simulation]);
+
   const handleStartSimulation = useCallback((finalizedMap: MapData, teams: TeamConfig[]) => {
+    simulation.saveWorkspace(finalizedMap, teams);
     simulation.teams = teams;
     simulation.loadRace(finalizedMap.id, finalizedMap);
     setCurrentScene('simulation');
@@ -42,6 +47,7 @@ export default function App() {
           currentMap={simulation.currentMap}
           teams={simulation.teams}
           onStartSimulation={handleStartSimulation}
+          onSaveWorkspace={handleSaveWorkspace}
         />
       )}
 

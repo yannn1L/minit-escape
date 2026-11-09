@@ -112,7 +112,78 @@ export class RaceSimulation {
 
   constructor() {
     this.currentMap = GlobalRegistry.get<MapData>('map', this.currentMapKey)!;
+    this.loadSavedWorkspace();
     this.initSystems();
+  }
+
+  public static readonly WORKSPACE_STORAGE_KEY = 'minit_escape_saved_inspector_state_v1';
+
+  public loadSavedWorkspace(): void {
+    try {
+      const raw = localStorage.getItem(RaceSimulation.WORKSPACE_STORAGE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (parsed && parsed.mapData && Array.isArray(parsed.mapData.corridors)) {
+        const savedMap: MapData = {
+          ...this.currentMap,
+          ...parsed.mapData,
+          cameraConfig: {
+            ...DEFAULT_CAMERA_CONFIG,
+            ...(parsed.mapData.cameraConfig || {}),
+          },
+          layoutConfig: {
+            ...DEFAULT_LAYOUT_CONFIG,
+            ...(parsed.mapData.layoutConfig || {}),
+          },
+        };
+        this.currentMap = savedMap;
+        this.currentMapKey = savedMap.id || 'saved_workspace';
+        this.cameraConfig = { ...savedMap.cameraConfig! };
+        this.layoutConfig = { ...savedMap.layoutConfig! };
+      }
+      if (parsed && Array.isArray(parsed.teams) && parsed.teams.length > 0) {
+        this.teams = parsed.teams;
+      }
+      if (parsed && parsed.synthConfig) {
+        Sound.config = { ...Sound.config, ...parsed.synthConfig };
+      }
+    } catch (e) {
+      console.warn('Failed to restore saved inspector state:', e);
+    }
+  }
+
+  public saveWorkspace(mapData: MapData, teams?: TeamConfig[]): void {
+    const mergedMap: MapData = {
+      ...this.currentMap,
+      ...mapData,
+      cameraConfig: {
+        ...DEFAULT_CAMERA_CONFIG,
+        ...(mapData.cameraConfig || this.cameraConfig),
+      },
+      layoutConfig: {
+        ...DEFAULT_LAYOUT_CONFIG,
+        ...(mapData.layoutConfig || this.layoutConfig),
+      },
+    };
+    this.currentMap = mergedMap;
+    this.cameraConfig = { ...mergedMap.cameraConfig! };
+    this.layoutConfig = { ...mergedMap.layoutConfig! };
+    if (teams && teams.length > 0) {
+      this.teams = teams;
+    }
+    try {
+      localStorage.setItem(
+        RaceSimulation.WORKSPACE_STORAGE_KEY,
+        JSON.stringify({
+          mapData: mergedMap,
+          teams: this.teams,
+          synthConfig: Sound.config,
+          savedAt: Date.now(),
+        })
+      );
+    } catch (e) {
+      console.warn('Failed to save inspector workspace:', e);
+    }
   }
 
   private initSystems(): void {
@@ -166,6 +237,20 @@ export class RaceSimulation {
     if (this.canvas.width !== targetWidth || this.canvas.height !== targetHeight) {
       this.canvas.width = targetWidth;
       this.canvas.height = targetHeight;
+    }
+    if (
+      this.cameraConfig?.type === 'auto_moving' &&
+      !this.floodActive &&
+      this.floodDist === 0 &&
+      this.cachedFirstWallCorridor
+    ) {
+      const fwd = this.getForwardWallCameraPos(
+        this.cachedFirstWallCorridor,
+        false,
+        this.camZoom || this.cameraConfig.defaultZoom || 1.0
+      );
+      this.camX = this.targetCamX = fwd.x;
+      this.camY = this.targetCamY = fwd.y;
     }
   }
 
@@ -280,14 +365,16 @@ export class RaceSimulation {
       return { team, sp };
     });
 
+    const startZoom = Number(this.cameraConfig.defaultZoom);
+    const validStartZoom = !isNaN(startZoom) && startZoom > 0 ? startZoom : 1.0;
+
     let initX = 250;
     let initY = 400;
     if (this.cameraConfig.type === 'auto_moving') {
-      const wallCorridors = (this.currentMap.corridors || []).filter(c => c.hasMovingWall);
-      if (wallCorridors.length > 0) {
-        const firstWall = [...wallCorridors].sort((a, b) => (a.wallOrder || 1) - (b.wallOrder || 1))[0];
-        initX = firstWall.x + firstWall.w / 2;
-        initY = firstWall.y + firstWall.h / 2;
+      if (this.cachedFirstWallCorridor) {
+        const fwd = this.getForwardWallCameraPos(this.cachedFirstWallCorridor, false, validStartZoom);
+        initX = fwd.x;
+        initY = fwd.y;
       } else if (resolvedSpawns.length > 0) {
         initX = resolvedSpawns.reduce((sum, item) => sum + item.sp.x, 0) / resolvedSpawns.length;
         initY = resolvedSpawns.reduce((sum, item) => sum + item.sp.y, 0) / resolvedSpawns.length;
@@ -308,8 +395,6 @@ export class RaceSimulation {
       initY = c0.y + c0.h / 2;
     }
 
-    const startZoom = Number(this.cameraConfig.defaultZoom);
-    const validStartZoom = !isNaN(startZoom) && startZoom > 0 ? startZoom : 1.0;
     this.camX = this.targetCamX = initX;
     this.camY = this.targetCamY = initY;
     this.camZoom = this.targetCamZoom = validStartZoom;
@@ -766,21 +851,119 @@ export class RaceSimulation {
     this.updateCamera(rawDt);
   }
 
+  private getForwardWallCameraPos(
+    rect: CorridorRect,
+    isFloodRect: boolean,
+    zoom: number
+  ): { x: number; y: number } {
+    const dir = rect.wallDirection || 'right';
+    const z = Math.max(0.25, zoom || 1.0);
+    const forwardX = (this.virtualWidth / z) * 0.32;
+    const forwardY = (this.virtualHeight / z) * 0.32;
+
+    if (dir === 'right') {
+      const edgeX = isFloodRect ? rect.x + rect.w : rect.x;
+      return { x: edgeX + forwardX, y: rect.y + rect.h / 2 };
+    }
+    if (dir === 'left') {
+      const edgeX = isFloodRect ? rect.x : rect.x + rect.w;
+      return { x: edgeX - forwardX, y: rect.y + rect.h / 2 };
+    }
+    if (dir === 'up') {
+      const edgeY = isFloodRect ? rect.y : rect.y + rect.h;
+      return { x: rect.x + rect.w / 2, y: edgeY - forwardY };
+    }
+    // dir === 'down'
+    const edgeY = isFloodRect ? rect.y + rect.h : rect.y;
+    return { x: rect.x + rect.w / 2, y: edgeY + forwardY };
+  }
+
+  private getStageCorridorCameraPos(
+    c: CorridorRect,
+    stageBudgetTime: number,
+    zoom: number
+  ): { x: number; y: number } {
+    const speed = c.wallSpeed || 55;
+    const delay = c.wallDelay || 0;
+    const dir = c.wallDirection || 'right';
+    const activeTime = Math.max(0, stageBudgetTime - delay);
+    const z = Math.max(0.25, zoom || 1.0);
+    const forwardX = (this.virtualWidth / z) * 0.32;
+    const forwardY = (this.virtualHeight / z) * 0.32;
+
+    if (dir === 'right') {
+      const fillW = Math.min(c.w, activeTime * speed);
+      return { x: c.x + fillW + forwardX, y: c.y + c.h / 2 };
+    }
+    if (dir === 'left') {
+      const fillW = Math.min(c.w, activeTime * speed);
+      return { x: c.x + c.w - fillW - forwardX, y: c.y + c.h / 2 };
+    }
+    if (dir === 'up') {
+      const fillH = Math.min(c.h, activeTime * speed);
+      return { x: c.x + c.w / 2, y: c.y + c.h - fillH - forwardY };
+    }
+    // dir === 'down'
+    const fillH = Math.min(c.h, activeTime * speed);
+    return { x: c.x + c.w / 2, y: c.y + fillH + forwardY };
+  }
+
   updateCamera(dt: number): void {
     const config = this.cameraConfig || DEFAULT_CAMERA_CONFIG;
 
     if (config.type === 'auto_moving') {
-      // Auto Moving Cam: Follow the order of moving walls
-      if (this.floodActive && this.floodRects.length > 0) {
-        // Track the leading edge of the active moving wall
-        const latestRect = this.floodRects[this.floodRects.length - 1];
-        this.targetCamX = latestRect.x + latestRect.w / 2;
-        this.targetCamY = latestRect.y + latestRect.h / 2;
+      const activeZoom = this.camZoom || config.defaultZoom || 1.0;
+      // Auto Moving Cam: Position camera forward ahead of the moving wall's leading edge
+      // and smoothly predict/pan toward the next wall order when progress reaches predictNextOrderAt%
+      if (this.floodActive && this.cachedWallStages.length > 0) {
+        let budgetTime = this.floodDist / 52;
+        let activeStageIdx = 0;
+
+        for (let o = 0; o < this.cachedWallStages.length; o++) {
+          const stage = this.cachedWallStages[o];
+          if (budgetTime < stage.maxDuration || o === this.cachedWallStages.length - 1) {
+            activeStageIdx = o;
+            break;
+          }
+          budgetTime -= stage.maxDuration;
+        }
+
+        const activeStage = this.cachedWallStages[activeStageIdx];
+        const activeCorridor = activeStage.corridors[activeStage.corridors.length - 1];
+        const currPos = this.getStageCorridorCameraPos(activeCorridor, budgetTime, activeZoom);
+
+        const nextStage = this.cachedWallStages[activeStageIdx + 1];
+        const predictPct = Math.max(10, Math.min(100, config.predictNextOrderAt ?? 75));
+        const threshold = predictPct / 100;
+        const stageProgress =
+          activeStage.maxDuration > 0
+            ? Math.max(0, Math.min(1, budgetTime / activeStage.maxDuration))
+            : 1;
+
+        if (
+          nextStage &&
+          nextStage.corridors.length > 0 &&
+          threshold < 1 &&
+          stageProgress >= threshold
+        ) {
+          const nextCorridor = nextStage.corridors[nextStage.corridors.length - 1];
+          const nextPos = this.getStageCorridorCameraPos(nextCorridor, 0, activeZoom);
+          const rawBlend = Math.max(
+            0,
+            Math.min(1, (stageProgress - threshold) / (1 - threshold))
+          );
+          const smoothBlend = rawBlend * rawBlend * (3 - 2 * rawBlend);
+          this.targetCamX = currPos.x + (nextPos.x - currPos.x) * smoothBlend;
+          this.targetCamY = currPos.y + (nextPos.y - currPos.y) * smoothBlend;
+        } else {
+          this.targetCamX = currPos.x;
+          this.targetCamY = currPos.y;
+        }
       } else {
-        // Focus cached first moving wall corridor or start bay without per-frame array allocations
         if (this.cachedFirstWallCorridor) {
-          this.targetCamX = this.cachedFirstWallCorridor.x + this.cachedFirstWallCorridor.w / 2;
-          this.targetCamY = this.cachedFirstWallCorridor.y + this.cachedFirstWallCorridor.h / 2;
+          const fwd = this.getForwardWallCameraPos(this.cachedFirstWallCorridor, false, activeZoom);
+          this.targetCamX = fwd.x;
+          this.targetCamY = fwd.y;
         } else {
           this.targetCamX = this.cachedSpawnCenter.x;
           this.targetCamY = this.cachedSpawnCenter.y;

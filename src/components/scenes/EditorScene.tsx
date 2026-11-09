@@ -330,6 +330,7 @@ interface EditorSceneProps {
   currentMap: MapData;
   teams: TeamConfig[];
   onStartSimulation: (mapData: MapData, teams: TeamConfig[]) => void;
+  onSaveWorkspace?: (mapData: MapData, teams: TeamConfig[]) => void;
 }
 
 type EditorMode = 'select' | 'draw' | 'gate' | 'gate_v' | 'pickup' | 'barrier' | 'barrier_v' | 'spawn';
@@ -351,6 +352,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
   currentMap,
   teams,
   onStartSimulation,
+  onSaveWorkspace,
 }) => {
   const [activeTab, setActiveTab] = useState<'track' | 'roster' | 'sound'>('track');
   const [editorMode, setEditorMode] = useState<EditorMode>('select');
@@ -490,7 +492,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
   };
 
 
-  // Manual save system (Local Storage Slots)
+  // Manual & Auto Save System (persists all Track Inspector tabs: Editor, Presets, Cam, Layout, plus Racers & Synth)
   const [saveToast, setSaveToast] = useState<string | null>(null);
   const [savedSlots, setSavedSlots] = useState<Array<{ name: string; date: string; data: any }>>(() => {
     try {
@@ -501,34 +503,105 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     }
   });
 
-  const handleSaveTrack = () => {
-    const trackPayload = {
-      id: `saved_${Date.now()}`,
-      name: mapName,
-      corridors,
-      gates,
-      pickups,
-      barriers,
-      finishZone,
-      baySpawns,
-      wallTriggerMode,
-      wallTriggerTimer,
-      cameraConfig,
-      layoutConfig,
-    };
-    const updated = [
-      { name: mapName, date: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), data: trackPayload },
-      ...savedSlots.filter(s => s.name !== mapName).slice(0, 5)
-    ];
-    setSavedSlots(updated);
-    try {
-      localStorage.setItem('minit_escape_custom_tracks', JSON.stringify(updated));
-    } catch (e) {
-      console.warn('LocalStorage save failed:', e);
+  // Roster state
+  const [teamList, setTeamList] = useState<TeamConfig[]>(() => {
+    return teams.map(t => ({
+      ...t,
+      enabled: t.enabled !== undefined ? t.enabled : true
+    }));
+  });
+
+  // Sound state
+  const [scaleType, setScaleType] = useState(Sound.config.scaleType);
+  const [waveform, setWaveform] = useState(Sound.config.waveform);
+  const [secondaryWaveform, setSecondaryWaveform] = useState(Sound.config.secondaryWaveform || 'sine');
+  const [decayTime, setDecayTime] = useState(Sound.config.decayTime);
+  const [masterVolume, setMasterVolume] = useState(Sound.config.volume);
+
+  const buildCurrentMapData = useCallback((): MapData => ({
+    ...currentMap,
+    id: currentMap.id || `custom_${Date.now()}`,
+    name: mapName,
+    corridors,
+    gates,
+    pickups,
+    barriers,
+    finishZone,
+    baySpawns,
+    wallTriggerMode,
+    wallTriggerTimer,
+    cameraConfig: { ...cameraConfig },
+    layoutConfig: { ...layoutConfig },
+  }), [
+    currentMap,
+    mapName,
+    corridors,
+    gates,
+    pickups,
+    barriers,
+    finishZone,
+    baySpawns,
+    wallTriggerMode,
+    wallTriggerTimer,
+    cameraConfig,
+    layoutConfig,
+  ]);
+
+  // Auto-save all Track Inspector changes to active workspace so no changes are ever lost
+  useEffect(() => {
+    if (onSaveWorkspace) {
+      onSaveWorkspace(buildCurrentMapData(), teamList);
     }
+  }, [
+    buildCurrentMapData,
+    teamList,
+    scaleType,
+    waveform,
+    secondaryWaveform,
+    decayTime,
+    masterVolume,
+    onSaveWorkspace,
+  ]);
+
+  const handleSaveTrack = useCallback(() => {
+    const mapPayload = buildCurrentMapData();
+    if (onSaveWorkspace) {
+      onSaveWorkspace(mapPayload, teamList);
+    }
+    const trackPayload = {
+      ...mapPayload,
+      id: `saved_${Date.now()}`,
+      teams: teamList,
+      synthConfig: { ...Sound.config },
+    };
+    const timestamp = new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+    setSavedSlots(prev => {
+      const updated = [
+        { name: mapName, date: timestamp, data: trackPayload },
+        ...prev.filter(s => s.name !== mapName).slice(0, 7),
+      ];
+      try {
+        localStorage.setItem('minit_escape_custom_tracks', JSON.stringify(updated));
+      } catch (e) {
+        console.warn('LocalStorage save failed:', e);
+      }
+      return updated;
+    });
     setSaveToast(`Saved "${mapName}"!`);
     setTimeout(() => setSaveToast(null), 2500);
-  };
+  }, [buildCurrentMapData, mapName, onSaveWorkspace, teamList]);
+
+  // Keyboard shortcut Ctrl+S / Cmd+S to save Track Inspector changes
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+        e.preventDefault();
+        handleSaveTrack();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [handleSaveTrack]);
 
   const handleLoadSavedSlot = (slotData: any) => {
     pushSnapshot();
@@ -543,7 +616,32 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     if (slotData.wallTriggerTimer !== undefined) setWallTriggerTimer(slotData.wallTriggerTimer);
     if (slotData.cameraConfig) setCameraConfig({ ...DEFAULT_CAMERA_CONFIG, ...slotData.cameraConfig });
     if (slotData.layoutConfig) setLayoutConfig({ ...DEFAULT_LAYOUT_CONFIG, ...slotData.layoutConfig });
+    if (Array.isArray(slotData.teams) && slotData.teams.length > 0) {
+      setTeamList(slotData.teams);
+    }
+    if (slotData.synthConfig) {
+      Sound.config = { ...Sound.config, ...slotData.synthConfig };
+      setScaleType(Sound.config.scaleType);
+      setWaveform(Sound.config.waveform);
+      setSecondaryWaveform(Sound.config.secondaryWaveform || 'sine');
+      setDecayTime(Sound.config.decayTime);
+      setMasterVolume(Sound.config.volume);
+    }
     clearSelection();
+    setSaveToast(`Loaded "${slotData.name || 'Saved Circuit'}"!`);
+    setTimeout(() => setSaveToast(null), 2200);
+  };
+
+  const handleDeleteSavedSlot = (slotName: string) => {
+    setSavedSlots(prev => {
+      const updated = prev.filter(s => s.name !== slotName);
+      try {
+        localStorage.setItem('minit_escape_custom_tracks', JSON.stringify(updated));
+      } catch (e) {
+        console.warn('LocalStorage delete failed:', e);
+      }
+      return updated;
+    });
   };
 
   // SVG & Canvas container interaction refs
@@ -623,21 +721,6 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     }
     return { w: Math.max(180, w), h: Math.max(140, h), aspect: targetAspect };
   }, [layoutConfig.aspectRatio, canvasStageSize]);
-
-  // Roster state
-  const [teamList, setTeamList] = useState<TeamConfig[]>(() => {
-    return teams.map(t => ({
-      ...t,
-      enabled: t.enabled !== undefined ? t.enabled : true
-    }));
-  });
-
-  // Sound state
-  const [scaleType, setScaleType] = useState(Sound.config.scaleType);
-  const [waveform, setWaveform] = useState(Sound.config.waveform);
-  const [secondaryWaveform, setSecondaryWaveform] = useState(Sound.config.secondaryWaveform || 'sine');
-  const [decayTime, setDecayTime] = useState(Sound.config.decayTime);
-  const [masterVolume, setMasterVolume] = useState(Sound.config.volume);
 
   // Dynamic Arena Bounds (Unlimited Arena Size support)
   // Frozen while dragging an object so the camera viewBox never shifts or rescales mid-drag
@@ -798,7 +881,31 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
       const wallCorridors = corridors.filter(c => c.hasMovingWall);
       if (wallCorridors.length > 0) {
         const firstWall = [...wallCorridors].sort((a, b) => (a.wallOrder || 1) - (b.wallOrder || 1))[0];
-        return { x: firstWall.x + firstWall.w / 2, y: firstWall.y + firstWall.h / 2 };
+        const z = Math.max(0.25, Number(cameraConfig.defaultZoom) || 1.0);
+        const ratio = layoutConfig.aspectRatio || '4:3';
+        const aspect =
+          ratio === '1:1'
+            ? 1.0
+            : ratio === '16:9'
+            ? 16 / 9
+            : ratio === '4:3'
+            ? 4 / 3
+            : Math.max(0.25, canvasContainerSize.w / Math.max(1, canvasContainerSize.h));
+        const baseSimW = aspect >= 1 ? Math.round(600 * aspect) : 500;
+        const baseSimH = aspect >= 1 ? 600 : Math.round(500 / aspect);
+        const forwardX = (baseSimW / z) * 0.32;
+        const forwardY = (baseSimH / z) * 0.32;
+        const dir = firstWall.wallDirection || 'right';
+        if (dir === 'right') {
+          return { x: firstWall.x + forwardX, y: firstWall.y + firstWall.h / 2 };
+        }
+        if (dir === 'left') {
+          return { x: firstWall.x + firstWall.w - forwardX, y: firstWall.y + firstWall.h / 2 };
+        }
+        if (dir === 'up') {
+          return { x: firstWall.x + firstWall.w / 2, y: firstWall.y + firstWall.h - forwardY };
+        }
+        return { x: firstWall.x + firstWall.w / 2, y: firstWall.y + forwardY };
       }
     }
     if (baySpawns && baySpawns.length > 0) {
@@ -809,7 +916,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
       return { x: lowest.x + lowest.w / 2, y: lowest.y + lowest.h / 2 };
     }
     return { x: 250, y: 700 };
-  }, [cameraConfig.type, baySpawns, spawnBounds, corridors]);
+  }, [cameraConfig.type, cameraConfig.defaultZoom, layoutConfig.aspectRatio, canvasContainerSize, baySpawns, spawnBounds, corridors]);
 
   const camPreviewRect = useMemo(() => {
     const z = Math.max(0.2, Number(cameraConfig.defaultZoom) || 1.0);
@@ -1444,6 +1551,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
       wallTriggerTimer,
       cameraConfig,
       layoutConfig,
+      teams: teamList,
+      synthConfig: Sound.config,
     }, null, 2);
     const blob = new Blob([data], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
@@ -1473,6 +1582,15 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
         if (json.wallTriggerTimer !== undefined) setWallTriggerTimer(json.wallTriggerTimer);
         if (json.cameraConfig) setCameraConfig({ ...DEFAULT_CAMERA_CONFIG, ...json.cameraConfig });
         if (json.layoutConfig) setLayoutConfig({ ...DEFAULT_LAYOUT_CONFIG, ...json.layoutConfig });
+        if (Array.isArray(json.teams) && json.teams.length > 0) setTeamList(json.teams);
+        if (json.synthConfig) {
+          Sound.config = { ...Sound.config, ...json.synthConfig };
+          setScaleType(Sound.config.scaleType);
+          setWaveform(Sound.config.waveform);
+          setSecondaryWaveform(Sound.config.secondaryWaveform || 'sine');
+          setDecayTime(Sound.config.decayTime);
+          setMasterVolume(Sound.config.volume);
+        }
       } catch (err) {
         console.error('Failed to parse track JSON:', err);
       }
@@ -2454,8 +2572,23 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                     ({corridors.length}C · {gates.length}G · {pickups.length}P)
                   </span>
                 </div>
-                {/* Portrait Drawer Size Toggle */}
-                <div className="flex items-center gap-1 landscape:hidden lg:hidden">
+
+                {/* Save Inspector Changes Button + Portrait Drawer Toggle */}
+                <div className="flex items-center gap-1 shrink-0">
+                  {saveToast && (
+                    <span className="bg-emerald-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-xs truncate max-w-[110px]">
+                      ✓ {saveToast}
+                    </span>
+                  )}
+                  <button
+                    type="button"
+                    onClick={handleSaveTrack}
+                    className="paper-btn bg-amber-300 hover:bg-amber-400 text-[10px] px-2 py-0.5 font-black text-slate-950 flex items-center gap-1 cursor-pointer shadow-xs"
+                    title="Save all Track Inspector changes (Editor, Presets, Cam, Layout)"
+                  >
+                    <Save className="w-3 h-3 stroke-[2.5]" />
+                    <span>Save</span>
+                  </button>
                   <button
                     type="button"
                     onClick={() =>
@@ -2463,7 +2596,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         prev === 'collapsed' ? 'compact' : prev === 'compact' ? 'expanded' : 'collapsed'
                       )
                     }
-                    className="paper-btn bg-white hover:bg-slate-100 text-[9px] px-1.5 py-0.5 font-black text-slate-700 flex items-center gap-0.5"
+                    className="paper-btn bg-white hover:bg-slate-100 text-[9px] px-1.5 py-0.5 font-black text-slate-700 flex items-center gap-0.5 landscape:hidden lg:hidden"
                     title="Cycle Inspector Drawer Height in Portrait"
                   >
                     {portraitDrawerMode === 'collapsed' ? (
@@ -2542,6 +2675,62 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
               {/* TAB CONTENT: PRESET TILE */}
               {inspectorTab === 'preset_tile' && (
                 <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+                  {/* Saved Inspector Configurations & Custom Tracks */}
+                  <div className="paper-card bg-emerald-50/90 p-2 border border-emerald-500 space-y-1.5 shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase text-emerald-950 tracking-wider flex items-center gap-1">
+                        <Save className="w-3 h-3 text-emerald-700" />
+                        Saved Inspector Configs
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleSaveTrack}
+                        className="paper-btn bg-emerald-400 hover:bg-emerald-300 text-slate-950 text-[9.5px] px-2 py-0.5 font-black cursor-pointer"
+                      >
+                        + Save Current
+                      </button>
+                    </div>
+                    {savedSlots.length === 0 ? (
+                      <span className="text-[9.5px] text-emerald-800 block">
+                        All Track Inspector edits auto-save continuously. Click "Save" to bookmark named snapshots here.
+                      </span>
+                    ) : (
+                      <div className="space-y-1 max-h-28 overflow-y-auto pr-0.5">
+                        {savedSlots.map((slot) => (
+                          <div
+                            key={slot.name}
+                            className="flex items-center justify-between gap-1 bg-white px-2 py-1 rounded border border-slate-300"
+                          >
+                            <div className="min-w-0 flex-1">
+                              <span className="text-[10px] font-black text-slate-800 block truncate">
+                                {slot.name}
+                              </span>
+                              <span className="text-[8.5px] font-bold text-slate-400 block">
+                                Saved at {slot.date}
+                              </span>
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <button
+                                type="button"
+                                onClick={() => handleLoadSavedSlot(slot.data)}
+                                className="paper-btn bg-sky-200 hover:bg-sky-300 text-sky-950 text-[9.5px] px-2 py-0.5 font-black cursor-pointer"
+                              >
+                                Load
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => handleDeleteSavedSlot(slot.name)}
+                                className="paper-btn bg-rose-100 hover:bg-rose-200 text-rose-800 text-[9.5px] px-1.5 py-0.5 font-black cursor-pointer"
+                                title="Delete saved slot"
+                              >
+                                <Trash2 className="w-2.5 h-2.5" />
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                   {/* Preset Maps List */}
                   <div className="paper-card bg-amber-50/90 p-2 border border-slate-400 space-y-1.5 shadow-xs">
                     <div className="flex items-center justify-between">
@@ -2771,6 +2960,65 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                       })}
                     </div>
                   </div>
+
+                  {/* If Auto Moving Cam mode, configure next-order prediction threshold */}
+                  {(cameraConfig.type || 'auto_moving') === 'auto_moving' && (
+                    <div className="paper-card bg-sky-50 p-2 border border-sky-400 space-y-2">
+                      <span className="text-[11px] font-black text-sky-950 uppercase block">
+                        Next-Order Early Prediction
+                      </span>
+
+                      <NumberStepper
+                        label="Predict Next Order At"
+                        unit="%"
+                        value={cameraConfig.predictNextOrderAt ?? 75}
+                        min={10}
+                        max={100}
+                        step={5}
+                        onChange={(val) =>
+                          setCameraConfig(prev => ({ ...prev, predictNextOrderAt: val }))
+                        }
+                      />
+                      <input
+                        type="range"
+                        min="10"
+                        max="100"
+                        step="5"
+                        value={cameraConfig.predictNextOrderAt ?? 75}
+                        onPointerDown={prepareDragSnapshot}
+                        onChange={(e) => {
+                          const val = parseInt(e.target.value, 10);
+                          setCameraConfig(prev => ({ ...prev, predictNextOrderAt: val }));
+                        }}
+                        className="w-full accent-sky-600 cursor-pointer"
+                      />
+                      <div className="flex items-center gap-1">
+                        {[50, 65, 75, 85, 100].map((presetPct) => {
+                          const isCurrent = (cameraConfig.predictNextOrderAt ?? 75) === presetPct;
+                          return (
+                            <button
+                              key={presetPct}
+                              type="button"
+                              onClick={() => {
+                                pushSnapshot();
+                                setCameraConfig(prev => ({ ...prev, predictNextOrderAt: presetPct }));
+                              }}
+                              className={`flex-1 py-1 rounded text-[10px] font-black border transition-all cursor-pointer ${
+                                isCurrent
+                                  ? 'bg-sky-500 text-white border-slate-900 shadow-xs'
+                                  : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
+                              }`}
+                            >
+                              {presetPct === 100 ? 'Off (100%)' : `${presetPct}%`}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <span className="text-[9px] text-sky-900 block leading-tight">
+                        When the current moving wall reaches this progress % toward its destination, the camera predicts the next wall order and smoothly glides ahead.
+                      </span>
+                    </div>
+                  )}
 
                   {/* If Selected Racer mode, choose target racer */}
                   {cameraConfig.type === 'selected_racer' && (

@@ -191,9 +191,27 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
       </div>
     ) : null;
 
+  const lastTitleTapRef = useRef<number>(0);
+
+  const handleTitleDoubleClick = () => {
+    onBackToEditor?.();
+  };
+
+  const handleTitlePointerDown = () => {
+    const now = performance.now();
+    if (now - lastTitleTapRef.current < 320) {
+      lastTitleTapRef.current = 0;
+      onBackToEditor?.();
+    } else {
+      lastTitleTapRef.current = now;
+    }
+  };
+
   const titleNode =
     layout.showTitle !== false ? (
       <div
+        onDoubleClick={handleTitleDoubleClick}
+        onPointerDown={handleTitlePointerDown}
         style={{
           transform: `translate(${titleOffsetX}px, ${titleOffsetY}px) scale(${titleScale})`,
           transformOrigin:

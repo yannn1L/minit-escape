@@ -91,11 +91,12 @@ export type CameraType = 'auto_moving' | 'selected_racer' | 'manual';
 
 export interface CameraConfig {
   type: CameraType;
-  defaultZoom: number;      // Default zoom scale (e.g. 1.0)
-  minZoom: number;          // Minimum zoom scale (e.g. 0.4)
-  maxZoom: number;          // Maximum zoom scale (e.g. 2.5)
-  smoothSpeed: number;      // Lerp smoothing factor (e.g. 4.5)
-  targetRacerId?: string;   // 'leader' or specific team id (e.g. 'cyan', 'red', etc.)
+  defaultZoom: number;        // Default zoom scale (e.g. 1.0)
+  minZoom: number;            // Minimum zoom scale (e.g. 0.4)
+  maxZoom: number;            // Maximum zoom scale (e.g. 2.5)
+  smoothSpeed: number;        // Lerp smoothing factor (e.g. 4.5)
+  targetRacerId?: string;     // 'leader' or specific team id (e.g. 'cyan', 'red', etc.)
+  predictNextOrderAt?: number;// % progress of current wall order (default 75) to start moving to next order
 }
 
 export const DEFAULT_CAMERA_CONFIG: CameraConfig = {
@@ -105,6 +106,7 @@ export const DEFAULT_CAMERA_CONFIG: CameraConfig = {
   maxZoom: 2.5,
   smoothSpeed: 4.5,
   targetRacerId: 'leader',
+  predictNextOrderAt: 75,
 };
 
 export type ViewportAspectRatio = '1:1' | '16:9' | '4:3' | 'auto';
