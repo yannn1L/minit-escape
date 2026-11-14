@@ -122,9 +122,13 @@ export class RaceSimulation {
   public splatters: Splatter[] = [];
   public dirtySplatters: Splatter[] = [];
   public particles: Particle[] = [];
+  private particlePool: Particle[] = [];
   public floatingTexts: FloatingText[] = [];
+  private floatingTextPool: FloatingText[] = [];
   public projectiles: Projectile[] = [];
+  private projectilePool: Projectile[] = [];
   public randomWeaponTimer = 2.0;
+  public corridorWeaponTimers: number[] = [];
   public trackCacheDirty = true;
 
   public allEliminatedDeclared = false;
@@ -140,6 +144,7 @@ export class RaceSimulation {
   private animFrameId: number | null = null;
   private lastTimestamp = 0;
   private lastStatsSignature = '';
+  private lastStatsEmitMs = 0;
   private cachedWallStages: Array<{ maxDuration: number; corridors: CorridorRect[] }> = [];
   private cachedFirstWallCorridor: CorridorRect | null = null;
   private cachedSpawnCenter: { x: number; y: number } = { x: 250, y: 400 };
@@ -354,17 +359,27 @@ export class RaceSimulation {
     this.world.clear();
     this.splatters.length = 0;
     this.dirtySplatters.length = 0;
-    this.particles.length = 0;
-    this.floatingTexts.length = 0;
-    this.projectiles.length = 0;
+    while (this.particles.length > 0) {
+      this.particlePool.push(this.particles.pop()!);
+    }
+    while (this.floatingTexts.length > 0) {
+      this.floatingTextPool.push(this.floatingTexts.pop()!);
+    }
+    while (this.projectiles.length > 0) {
+      this.projectilePool.push(this.projectiles.pop()!);
+    }
     this.floodRects.length = 0;
     this.floodDist = 0;
     this.randomWeaponTimer = 2.0;
+    this.corridorWeaponTimers = (this.currentMap.corridors || []).map(
+      c => Math.min(1.5, Math.max(0.5, (c.gunSpawner?.spawnInterval || 3.5) * 0.5))
+    );
     this.winnerDeclared = false;
     this.winningTeam = null;
     this.allEliminatedDeclared = false;
     this.trackCacheDirty = true;
     this.lastStatsSignature = '';
+    this.lastStatsEmitMs = 0;
     Sound.resetNoteIndex();
 
     this.rebuildWallStagesCache();
@@ -467,7 +482,11 @@ export class RaceSimulation {
 
     // Spawn pickups
     for (const pDef of this.currentMap.pickups) {
-      this.spawnPickup(pDef.type, pDef.x, pDef.y, 0);
+      this.spawnPickup(pDef.type, pDef.x, pDef.y, 0, {
+        damageMultiplier: pDef.damageMultiplier,
+        ammoMultiplier: pDef.ammoMultiplier,
+        fireRateMultiplier: pDef.fireRateMultiplier,
+      });
     }
 
     // Spawn selected Racers at their configured spawn positions
@@ -648,24 +667,76 @@ export class RaceSimulation {
     this.notifyStatsChanged(true);
   }
 
+  private acquireParticle(
+    x: number,
+    y: number,
+    vx: number,
+    vy: number,
+    size: number,
+    color: string,
+    life: number
+  ): void {
+    const slot = this.particlePool.pop();
+    if (slot) {
+      slot.x = x;
+      slot.y = y;
+      slot.vx = vx;
+      slot.vy = vy;
+      slot.size = size;
+      slot.color = color;
+      slot.life = life;
+      this.particles.push(slot);
+    } else {
+      this.particles.push({ x, y, vx, vy, size, color, life });
+    }
+  }
+
   spawnShellCasing(x: number, y: number, aimAngle: number): void {
-    if (this.particles.length >= 120) return;
+    if (this.particles.length >= 140) return;
     const ejectSide = aimAngle - Math.PI / 2 + (Math.random() - 0.5) * 0.45;
     const spd = 45 + Math.random() * 55;
-    this.particles.push({
+    this.acquireParticle(
       x,
       y,
-      vx: Math.cos(ejectSide) * spd,
-      vy: Math.sin(ejectSide) * spd - 25,
-      size: 3.2,
-      color: '#facc15',
-      life: 0.34,
-    });
+      Math.cos(ejectSide) * spd,
+      Math.sin(ejectSide) * spd - 25,
+      3.2,
+      '#facc15',
+      0.34
+    );
   }
 
   spawnProjectile(proj: Projectile): void {
-    if (this.projectiles.length > 80) this.projectiles.shift();
-    this.projectiles.push(proj);
+    if (this.projectiles.length > 90) {
+      const oldest = this.projectiles.shift();
+      if (oldest) this.projectilePool.push(oldest);
+    }
+    const slot = this.projectilePool.pop();
+    if (slot) {
+      slot.x = proj.x;
+      slot.y = proj.y;
+      slot.vx = proj.vx;
+      slot.vy = proj.vy;
+      slot.damage = proj.damage;
+      slot.color = proj.color;
+      slot.colorHex = proj.colorHex;
+      slot.ownerId = proj.ownerId;
+      slot.ownerTeamId = proj.ownerTeamId;
+      slot.battleAlliance = proj.battleAlliance;
+      slot.life = proj.life;
+      this.projectiles.push(slot);
+    } else {
+      this.projectiles.push(proj);
+    }
+  }
+
+  private releaseProjectileAt(idx: number): void {
+    const expired = this.projectiles[idx];
+    const last = this.projectiles.pop()!;
+    if (idx < this.projectiles.length) {
+      this.projectiles[idx] = last;
+    }
+    this.projectilePool.push(expired);
   }
 
   private updateProjectiles(dt: number): void {
@@ -677,8 +748,7 @@ export class RaceSimulation {
       const p = this.projectiles[i];
       p.life -= dt;
       if (p.life <= 0) {
-        this.projectiles[i] = this.projectiles[this.projectiles.length - 1];
-        this.projectiles.pop();
+        this.releaseProjectileAt(i);
         continue;
       }
 
@@ -688,8 +758,7 @@ export class RaceSimulation {
       // Destroy bullet if it leaves walkable rooms
       if (!Geometry.isPointInCorridors(p.x, p.y, corridors)) {
         this.spawnConfetti(p.x, p.y, p.colorHex, 2);
-        this.projectiles[i] = this.projectiles[this.projectiles.length - 1];
-        this.projectiles.pop();
+        this.releaseProjectileAt(i);
         continue;
       }
 
@@ -723,8 +792,7 @@ export class RaceSimulation {
       }
 
       if (hitTarget) {
-        this.projectiles[i] = this.projectiles[this.projectiles.length - 1];
-        this.projectiles.pop();
+        this.releaseProjectileAt(i);
       }
     }
   }
@@ -766,13 +834,28 @@ export class RaceSimulation {
     return id;
   }
 
-  spawnPickup(strategyKey: string, x: number, y: number, spawnDelay = 0): number {
+  spawnPickup(
+    strategyKey: string,
+    x: number,
+    y: number,
+    spawnDelay = 0,
+    opts?: {
+      damageMultiplier?: number;
+      ammoMultiplier?: number;
+      fireRateMultiplier?: number;
+      corridorIndex?: number;
+    }
+  ): number {
     const id = this.world.createEntity();
     this.world.addComponent(id, 'Transform', { x, y });
     this.world.addComponent(id, 'Pickup', {
       strategyKey,
       bobPhase: Math.random() * Math.PI * 2,
       spawnDelay,
+      damageMultiplier: opts?.damageMultiplier,
+      ammoMultiplier: opts?.ammoMultiplier,
+      fireRateMultiplier: opts?.fireRateMultiplier,
+      corridorIndex: opts?.corridorIndex,
     });
     return id;
   }
@@ -845,6 +928,54 @@ export class RaceSimulation {
     return false;
   }
 
+  private isPointSafeFromFlood(x: number, y: number, margin = 12): boolean {
+    if (!this.floodActive || this.floodRects.length === 0) return true;
+    for (let i = 0; i < this.floodRects.length; i++) {
+      const r = this.floodRects[i];
+      if (
+        Geometry.pointInRect(
+          x,
+          y,
+          r.x - margin,
+          r.y - margin,
+          r.w + margin * 2,
+          r.h + margin * 2
+        )
+      ) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  private sampleSafePointInSingleCorridor(
+    c: CorridorRect,
+    pad = 22
+  ): { x: number; y: number } | null {
+    for (let attempt = 0; attempt < 18; attempt++) {
+      const pt = Geometry.randomPointInSingleCorridor(c, pad);
+      if (this.isPointSafeFromFlood(pt.x, pt.y, 12)) {
+        return pt;
+      }
+    }
+    return null;
+  }
+
+  private sampleSafePointInCorridors(
+    corridors: CorridorRect[],
+    pad = 24
+  ): { x: number; y: number } | null {
+    if (!corridors || corridors.length === 0) return null;
+    for (let attempt = 0; attempt < 24; attempt++) {
+      const c = corridors[Math.floor(Math.random() * corridors.length)];
+      const pt = Geometry.randomPointInSingleCorridor(c, pad);
+      if (this.isPointSafeFromFlood(pt.x, pt.y, 12)) {
+        return pt;
+      }
+    }
+    return null;
+  }
+
   spawnInkSplatter(x: number, y: number, colorHex: number): void {
     if (this.splatters.length > 72) return;
     const colorCss = `#${colorHex.toString(16).padStart(6, '0')}`;
@@ -867,34 +998,48 @@ export class RaceSimulation {
 
   spawnConfetti(x: number, y: number, colorHex: number, count = 14): void {
     const color = `#${colorHex.toString(16).padStart(6, '0')}`;
-    const available = Math.max(0, 120 - this.particles.length);
+    const available = Math.max(0, 140 - this.particles.length);
     const toSpawn = Math.min(count, available);
     for (let i = 0; i < toSpawn; i++) {
       const ang = Math.random() * Math.PI * 2;
       const spd = 40 + Math.random() * 160;
-      this.particles.push({
+      this.acquireParticle(
         x,
         y,
-        vx: Math.cos(ang) * spd,
-        vy: Math.sin(ang) * spd - 30,
-        size: 3.5 + Math.random() * 4.5,
+        Math.cos(ang) * spd,
+        Math.sin(ang) * spd - 30,
+        3.5 + Math.random() * 4.5,
         color,
-        life: 0.42 + Math.random() * 0.3,
-      });
+        0.42 + Math.random() * 0.3
+      );
     }
   }
 
   spawnFloatingText(x: number, y: number, message: string, colorHex: number): void {
-    if (this.floatingTexts.length > 20) this.floatingTexts.shift();
+    if (this.floatingTexts.length > 20) {
+      const oldest = this.floatingTexts.shift();
+      if (oldest) this.floatingTextPool.push(oldest);
+    }
     const color = `#${colorHex.toString(16).padStart(6, '0')}`;
-    this.floatingTexts.push({
-      x,
-      y,
-      vy: -42,
-      message,
-      color,
-      life: 0.85,
-    });
+    const slot = this.floatingTextPool.pop();
+    if (slot) {
+      slot.x = x;
+      slot.y = y;
+      slot.vy = -42;
+      slot.message = message;
+      slot.color = color;
+      slot.life = 0.85;
+      this.floatingTexts.push(slot);
+    } else {
+      this.floatingTexts.push({
+        x,
+        y,
+        vy: -42,
+        message,
+        color,
+        life: 0.85,
+      });
+    }
   }
 
   triggerHitStop(duration: number): void {
@@ -945,6 +1090,10 @@ export class RaceSimulation {
 
   notifyStatsChanged(force = false): void {
     if (!this.onStatsUpdate) return;
+    const now = performance.now();
+    // Throttle routine non-forced HUD updates to ~16.6 Hz (60ms) to keep React reconciliation lightweight
+    if (!force && now - this.lastStatsEmitMs < 60) return;
+
     const racers = this.world.query('RacerState');
 
     const activeTeams = this.teams.filter(t => t.enabled !== false);
@@ -1026,6 +1175,7 @@ export class RaceSimulation {
     }
     if (!force && sig === this.lastStatsSignature) return;
     this.lastStatsSignature = sig;
+    this.lastStatsEmitMs = now;
 
     this.onStatsUpdate(stats);
   }
@@ -1051,20 +1201,91 @@ export class RaceSimulation {
       }
     }
 
-    // Random floor weapon spawner (active in Battler mode or when randomWeaponSpawn is enabled)
+    // Per-Corridor & Global Auto-Spawn Gun System
     const isBattler = (this.currentMap.trackType || 'races') === 'battler';
     const bCfg = this.currentMap.battlerConfig || DEFAULT_BATTLER_CONFIG;
-    if (!this.winnerDeclared && !this.allEliminatedDeclared && (isBattler ? bCfg.randomWeaponSpawn !== false : !!bCfg.randomWeaponSpawn)) {
-      this.randomWeaponTimer -= dt;
-      if (this.randomWeaponTimer <= 0) {
-        this.randomWeaponTimer = Math.max(1.0, bCfg.weaponSpawnInterval || 3.5);
-        const activePickups = this.world.query('Pickup');
-        const maxFloor = Math.max(1, bCfg.maxFloorWeapons || 6);
-        if (activePickups.length < maxFloor && this.currentMap.corridors.length > 0) {
-          const pt = Geometry.randomPointInCorridors(this.currentMap.corridors, 24);
-          const randomKey = FLOOR_WEAPON_POOL[Math.floor(Math.random() * FLOOR_WEAPON_POOL.length)];
-          this.spawnPickup(randomKey, pt.x, pt.y, 0);
-          this.spawnConfetti(pt.x, pt.y, 0xfacc15, 5);
+    if (!this.winnerDeclared && !this.allEliminatedDeclared) {
+      const corridors = this.currentMap.corridors || [];
+      let anyCorridorSpawnerActive = false;
+      for (let i = 0; i < corridors.length; i++) {
+        if (corridors[i].gunSpawner?.enabled) {
+          anyCorridorSpawnerActive = true;
+          break;
+        }
+      }
+
+      const masterAutoSpawnOn =
+        this.currentMap.battlerConfig?.randomWeaponSpawn !== undefined
+          ? this.currentMap.battlerConfig.randomWeaponSpawn
+          : isBattler || anyCorridorSpawnerActive;
+
+      if (masterAutoSpawnOn && anyCorridorSpawnerActive) {
+        // Spawn guns specifically inside corridors that have gunSpawner.enabled === true
+        for (let i = 0; i < corridors.length; i++) {
+          const c = corridors[i];
+          const gs = c.gunSpawner;
+          if (!gs || !gs.enabled) continue;
+
+          if (this.corridorWeaponTimers[i] === undefined) {
+            this.corridorWeaponTimers[i] = Math.max(0.5, gs.spawnInterval || 3.5);
+          }
+          this.corridorWeaponTimers[i] -= dt;
+          if (this.corridorWeaponTimers[i] <= 0) {
+            this.corridorWeaponTimers[i] = Math.max(0.5, gs.spawnInterval || 3.5);
+            const activePickups = this.world.query('Transform', 'Pickup');
+            let countInCorridor = 0;
+            for (let p = 0; p < activePickups.length; p++) {
+              const pId = activePickups[p];
+              const pk = this.world.getComponent(pId, 'Pickup')!;
+              const pPos = this.world.getComponent(pId, 'Transform')!;
+              if (pk.corridorIndex === i || Geometry.isPointInCorridor(pPos.x, pPos.y, c)) {
+                countInCorridor++;
+              }
+            }
+
+            const maxAllowed = Math.max(1, gs.maxActiveGuns || 3);
+            if (countInCorridor < maxAllowed) {
+              const pt = this.sampleSafePointInSingleCorridor(c, 22);
+              if (pt) {
+                const pool =
+                  gs.allowedGuns && gs.allowedGuns.length > 0
+                    ? gs.allowedGuns
+                    : ['uzi', 'ump', 'ak', 'mini14', 'scar'];
+                const chosenWeapon = pool[Math.floor(Math.random() * pool.length)];
+                this.spawnPickup(chosenWeapon, pt.x, pt.y, 0, {
+                  damageMultiplier: gs.damageMultiplier ?? 1.0,
+                  ammoMultiplier: gs.ammoMultiplier ?? 1.0,
+                  fireRateMultiplier: gs.fireRateMultiplier ?? 1.0,
+                  corridorIndex: i,
+                });
+                this.spawnConfetti(pt.x, pt.y, 0xfacc15, 5);
+              }
+            }
+          }
+        }
+      } else if (masterAutoSpawnOn) {
+        // Global Floor Weapon Spawner across all corridors (only in unflooded safe areas)
+        this.randomWeaponTimer -= dt;
+        if (this.randomWeaponTimer <= 0) {
+          this.randomWeaponTimer = Math.max(0.5, bCfg.weaponSpawnInterval || 3.5);
+          const activePickups = this.world.query('Pickup');
+          const maxFloor = Math.max(1, bCfg.maxFloorWeapons || 6);
+          if (activePickups.length < maxFloor && corridors.length > 0) {
+            const pt = this.sampleSafePointInCorridors(corridors, 24);
+            if (pt) {
+              const pool =
+                bCfg.allowedWeapons && bCfg.allowedWeapons.length > 0
+                  ? bCfg.allowedWeapons
+                  : FLOOR_WEAPON_POOL;
+              const randomKey = pool[Math.floor(Math.random() * pool.length)];
+              this.spawnPickup(randomKey, pt.x, pt.y, 0, {
+                damageMultiplier: bCfg.damageMultiplier ?? 1.0,
+                ammoMultiplier: bCfg.ammoMultiplier ?? 1.0,
+                fireRateMultiplier: bCfg.fireRateMultiplier ?? 1.0,
+              });
+              this.spawnConfetti(pt.x, pt.y, 0xfacc15, 5);
+            }
+          }
         }
       }
     }
@@ -1114,13 +1335,17 @@ export class RaceSimulation {
       }
     }
 
-    // Update particles with O(1) swap-and-pop removal
+    // Update particles with O(1) swap-and-pop removal + return to pool
     for (let i = this.particles.length - 1; i >= 0; i--) {
       const p = this.particles[i];
       p.life -= rawDt;
       if (p.life <= 0) {
-        this.particles[i] = this.particles[this.particles.length - 1];
-        this.particles.pop();
+        const expired = this.particles[i];
+        const last = this.particles.pop()!;
+        if (i < this.particles.length) {
+          this.particles[i] = last;
+        }
+        this.particlePool.push(expired);
         continue;
       }
       p.x += p.vx * rawDt;
@@ -1128,13 +1353,17 @@ export class RaceSimulation {
       p.vy += 260 * rawDt;
     }
 
-    // Update floating texts with O(1) swap-and-pop removal
+    // Update floating texts with O(1) swap-and-pop removal + return to pool
     for (let i = this.floatingTexts.length - 1; i >= 0; i--) {
       const ft = this.floatingTexts[i];
       ft.life -= rawDt;
       if (ft.life <= 0) {
-        this.floatingTexts[i] = this.floatingTexts[this.floatingTexts.length - 1];
-        this.floatingTexts.pop();
+        const expired = this.floatingTexts[i];
+        const last = this.floatingTexts.pop()!;
+        if (i < this.floatingTexts.length) {
+          this.floatingTexts[i] = last;
+        }
+        this.floatingTextPool.push(expired);
         continue;
       }
       ft.y += ft.vy * rawDt;

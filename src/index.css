@@ -24,6 +24,7 @@ body {
   border: 2px solid #0f172a;
   box-shadow: var(--paper-shadow);
   border-radius: 10px;
+  transition: transform 0.16s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.16s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .paper-btn {
@@ -36,7 +37,7 @@ body {
   cursor: pointer;
   user-select: none;
   -webkit-user-select: none;
-  transition: transform 0.08s ease, box-shadow 0.08s ease, background-color 0.15s ease;
+  transition: transform 0.14s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.14s cubic-bezier(0.16, 1, 0.3, 1), background-color 0.14s ease, color 0.14s ease;
   white-space: nowrap;
 }
 
@@ -66,6 +67,10 @@ body {
   box-shadow: var(--paper-shadow-sm);
 }
 
+.studio-spring {
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
 /* Custom scrollbar for editors */
 ::-webkit-scrollbar {
   width: 6px;
@@ -78,3 +83,7 @@ body {
   background: rgba(15, 23, 42, 0.35);
   border-radius: 3px;
 }
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(15, 23, 42, 0.55);
+}
+

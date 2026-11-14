@@ -179,13 +179,9 @@ export class Geometry {
   }
 
   /**
-   * Pick a random valid floor point inside any walkable corridor or circular room
+   * Pick a random valid floor point inside a specific corridor or circular room
    */
-  static randomPointInCorridors(corridors: CorridorRect[], pad = 22): { x: number; y: number } {
-    if (!corridors || corridors.length === 0) {
-      return { x: 250, y: 400 };
-    }
-    const c = corridors[Math.floor(Math.random() * corridors.length)];
+  static randomPointInSingleCorridor(c: CorridorRect, pad = 22): { x: number; y: number } {
     if (c.shape === 'circle') {
       const rx = Math.max(8, c.w / 2 - pad);
       const ry = Math.max(8, c.h / 2 - pad);
@@ -198,12 +194,25 @@ export class Geometry {
         y: Math.round(ccy + Math.sin(theta) * ry * r),
       };
     }
-    const safeW = Math.max(10, c.w - pad * 2);
-    const safeH = Math.max(10, c.h - pad * 2);
+    const safePadX = Math.min(pad, Math.max(4, c.w * 0.3));
+    const safePadY = Math.min(pad, Math.max(4, c.h * 0.3));
+    const safeW = Math.max(6, c.w - safePadX * 2);
+    const safeH = Math.max(6, c.h - safePadY * 2);
     return {
-      x: Math.round(c.x + pad + Math.random() * safeW),
-      y: Math.round(c.y + pad + Math.random() * safeH),
+      x: Math.round(c.x + safePadX + Math.random() * safeW),
+      y: Math.round(c.y + safePadY + Math.random() * safeH),
     };
+  }
+
+  /**
+   * Pick a random valid floor point inside any walkable corridor or circular room
+   */
+  static randomPointInCorridors(corridors: CorridorRect[], pad = 22): { x: number; y: number } {
+    if (!corridors || corridors.length === 0) {
+      return { x: 250, y: 400 };
+    }
+    const c = corridors[Math.floor(Math.random() * corridors.length)];
+    return this.randomPointInSingleCorridor(c, pad);
   }
 
   /**

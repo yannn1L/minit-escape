@@ -8,14 +8,30 @@ export type TrackType = 'races' | 'battler';
 
 export type BattlerSubMode = 'ffa' | 'team_battle' | 'boss_fight';
 
+export interface CorridorGunSpawnerConfig {
+  enabled: boolean;               // Whether auto gun spawn is active specifically in this corridor
+  allowedGuns?: WeaponType[];     // Which guns/weapons can spawn in this corridor
+  damageMultiplier?: number;      // Damage multiplier for spawned guns (default 1.0)
+  ammoMultiplier?: number;        // Ammo capacity multiplier for spawned guns (default 1.0)
+  fireRateMultiplier?: number;    // Fire rate multiplier for spawned guns (default 1.0)
+  spawnInterval?: number;         // Seconds between gun spawns in this corridor (default 3.5)
+  maxActiveGuns?: number;         // Max active floor guns in this corridor at once (default 3)
+}
+
+export const DEFAULT_ALLOWED_GUNS: WeaponType[] = ['uzi', 'ump', 'ak', 'mini14', 'scar'];
+
 export interface BattlerConfig {
   subMode: BattlerSubMode;          // 'ffa' | 'team_battle' | 'boss_fight'
   defaultHp: number;                // Default HP for all racers (default 100)
   bossTeamId?: string;              // Which racer is the Boss in 'boss_fight' mode
   bossHpMultiplier?: number;        // Boss HP multiplier (default 4 -> 400 HP)
-  randomWeaponSpawn: boolean;       // Periodically spawn random weapons on the floor
+  randomWeaponSpawn: boolean;       // Master toggle: periodically spawn weapons on the floor
   weaponSpawnInterval: number;      // Seconds between random floor weapon spawns (e.g. 3.5)
   maxFloorWeapons: number;          // Max active floor pickups at once (e.g. 6)
+  allowedWeapons?: WeaponType[];    // Allowed weapons for global auto-spawner
+  damageMultiplier?: number;        // Global damage multiplier for spawned weapons (default 1.0)
+  ammoMultiplier?: number;          // Global ammo multiplier for spawned weapons (default 1.0)
+  fireRateMultiplier?: number;      // Global fire rate multiplier for spawned weapons (default 1.0)
 }
 
 export const DEFAULT_BATTLER_CONFIG: BattlerConfig = {
@@ -26,6 +42,10 @@ export const DEFAULT_BATTLER_CONFIG: BattlerConfig = {
   randomWeaponSpawn: true,
   weaponSpawnInterval: 3.5,
   maxFloorWeapons: 6,
+  allowedWeapons: ['uzi', 'ump', 'ak', 'mini14', 'scar'],
+  damageMultiplier: 1.0,
+  ammoMultiplier: 1.0,
+  fireRateMultiplier: 1.0,
 };
 
 export interface TeamConfig {
@@ -66,6 +86,7 @@ export interface CorridorRect {
   wallSpeed?: number;                   // Advance speed (default: 55)
   wallDelay?: number;                   // Delay in seconds before this wall activates
   wallOrder?: number;                   // Sequence order: wall moves only after previous order completes
+  gunSpawner?: CorridorGunSpawnerConfig;// Per-corridor gun auto-spawn configuration
 }
 
 export type BarrierMovement = 'static' | 'horizontal' | 'vertical' | 'diagonal_up' | 'diagonal_down';
@@ -99,6 +120,9 @@ export interface PickupConfig {
   type: string;
   x: number;
   y: number;
+  damageMultiplier?: number;
+  ammoMultiplier?: number;
+  fireRateMultiplier?: number;
 }
 
 export interface Waypoint {

@@ -28,6 +28,8 @@ export interface RacerStateComponent {
   weaponCooldown: number;
   weaponAmmo: number;
   weaponMaxAmmo: number;
+  weaponDamageMultiplier?: number;
+  weaponFireRateMultiplier?: number;
   muzzleFlashTimer: number;
   recoilTimer: number;
   aimAngle: number;
@@ -71,6 +73,10 @@ export interface PickupComponent {
   strategyKey: string;
   bobPhase: number;
   spawnDelay: number;
+  damageMultiplier?: number;
+  ammoMultiplier?: number;
+  fireRateMultiplier?: number;
+  corridorIndex?: number;
 }
 
 export interface PaperRenderComponent {

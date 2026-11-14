@@ -17,11 +17,13 @@ import type {
   TrackType,
   BattlerConfig,
   BattlerSubMode,
+  WeaponType,
 } from '../../types/game';
 import {
   DEFAULT_CAMERA_CONFIG,
   DEFAULT_LAYOUT_CONFIG,
   DEFAULT_BATTLER_CONFIG,
+  DEFAULT_ALLOWED_GUNS,
 } from '../../types/game';
 import {
   MAP_CLASSIC_SERPENTINE,
@@ -345,6 +347,56 @@ const PaperDropdown: React.FC<PaperDropdownProps> = ({
   );
 };
 
+interface InspectorAccordionProps {
+  title: string;
+  icon?: React.ReactNode;
+  badge?: React.ReactNode;
+  defaultOpen?: boolean;
+  headerBgClass?: string;
+  borderClass?: string;
+  children: React.ReactNode;
+}
+
+const InspectorAccordion: React.FC<InspectorAccordionProps> = ({
+  title,
+  icon,
+  badge,
+  defaultOpen = true,
+  headerBgClass = 'bg-white hover:bg-amber-50/60',
+  borderClass = 'border-slate-900',
+  children,
+}) => {
+  const [isOpen, setIsOpen] = useState(defaultOpen);
+  return (
+    <div className={`paper-card ${borderClass} overflow-hidden transition-all duration-200`}>
+      <button
+        type="button"
+        onClick={() => {
+          Sound.play('button_click');
+          setIsOpen(prev => !prev);
+        }}
+        className={`w-full px-2.5 py-1.5 flex items-center justify-between gap-1.5 text-left select-none cursor-pointer transition-colors ${headerBgClass} ${
+          isOpen ? 'border-b border-slate-300/80' : ''
+        }`}
+      >
+        <span className="text-[10.5px] font-black uppercase text-slate-900 flex items-center gap-1.5 min-w-0 truncate">
+          {icon && <span className="shrink-0 flex items-center">{icon}</span>}
+          <span className="truncate">{title}</span>
+        </span>
+        <span className="flex items-center gap-1.5 shrink-0">
+          {badge}
+          <ChevronDown
+            className={`w-3.5 h-3.5 text-slate-700 stroke-[2.5] transition-transform duration-200 ${
+              isOpen ? 'rotate-180 text-slate-950' : ''
+            }`}
+          />
+        </span>
+      </button>
+      {isOpen && <div className="p-2 space-y-2 bg-white/95 text-xs">{children}</div>}
+    </div>
+  );
+};
+
 interface EditorSceneProps {
   currentMap: MapData;
   teams: TeamConfig[];
@@ -410,7 +462,10 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
   const [battlerConfig, setBattlerConfig] = useState<BattlerConfig>(
     currentMap.battlerConfig
       ? { ...DEFAULT_BATTLER_CONFIG, ...currentMap.battlerConfig }
-      : { ...DEFAULT_BATTLER_CONFIG }
+      : {
+          ...DEFAULT_BATTLER_CONFIG,
+          randomWeaponSpawn: currentMap.trackType === 'battler',
+        }
   );
   const [corridors, setCorridors] = useState<CorridorRect[]>(
     JSON.parse(JSON.stringify(currentMap.corridors || MAP_CLASSIC_SERPENTINE.corridors))
@@ -739,15 +794,69 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     origSpawns?: BaySpawn[];
   } | null>(null);
 
-  // Canvas View: Pan and Zoom state
+  // Canvas View: Pan, Zoom, Spacebar Pan, and Resizable/Collapsible Sidebar state
   const [canvasPan, setCanvasPan] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
   const [canvasZoom, setCanvasZoom] = useState<number>(1.0);
+  const [isSpacePressed, setIsSpacePressed] = useState<boolean>(false);
+  const [inspectorWidth, setInspectorWidth] = useState<number>(380);
+  const [isInspectorCollapsed, setIsInspectorCollapsed] = useState<boolean>(false);
+  const [isResizingInspector, setIsResizingInspector] = useState<boolean>(false);
+  const inspectorResizeStartRef = useRef<{ startX: number; startW: number } | null>(null);
   const [panDragState, setPanDragState] = useState<{
     startClientX: number;
     startClientY: number;
     startPanX: number;
     startPanY: number;
   } | null>(null);
+
+  // Spacebar hold listener for smooth canvas panning anywhere
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return;
+      if (e.code === 'Space') {
+        if (!e.repeat) setIsSpacePressed(true);
+        e.preventDefault();
+      }
+    };
+    const onKeyUp = (e: KeyboardEvent) => {
+      if (e.code === 'Space') {
+        setIsSpacePressed(false);
+      }
+    };
+    const onWindowBlur = () => setIsSpacePressed(false);
+    window.addEventListener('keydown', onKeyDown);
+    window.addEventListener('keyup', onKeyUp);
+    window.addEventListener('blur', onWindowBlur);
+    return () => {
+      window.removeEventListener('keydown', onKeyDown);
+      window.removeEventListener('keyup', onKeyUp);
+      window.removeEventListener('blur', onWindowBlur);
+    };
+  }, []);
+
+  // Resizable Inspector Sidebar drag effect
+  useEffect(() => {
+    if (!isResizingInspector) return;
+    const onPointerMove = (e: PointerEvent) => {
+      if (!inspectorResizeStartRef.current) return;
+      const deltaX = inspectorResizeStartRef.current.startX - e.clientX;
+      const nextWidth = Math.max(280, Math.min(560, Math.round(inspectorResizeStartRef.current.startW + deltaX)));
+      setInspectorWidth(nextWidth);
+    };
+    const onPointerUp = () => {
+      setIsResizingInspector(false);
+      inspectorResizeStartRef.current = null;
+    };
+    window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
+    window.addEventListener('pointercancel', onPointerUp);
+    return () => {
+      window.removeEventListener('pointermove', onPointerMove);
+      window.removeEventListener('pointerup', onPointerUp);
+      window.removeEventListener('pointercancel', onPointerUp);
+    };
+  }, [isResizingInspector]);
 
   // Observe Track Builder outer stage and inner canvas container size
   useEffect(() => {
@@ -775,7 +884,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     if (stageEl) ro.observe(stageEl);
     if (containerEl) ro.observe(containerEl);
     return () => ro.disconnect();
-  }, [activeTab, layoutConfig.aspectRatio, portraitDrawerMode]);
+  }, [activeTab, layoutConfig.aspectRatio, portraitDrawerMode, inspectorWidth, isInspectorCollapsed]);
 
   // Compute fitted box for the Track Builder viewport when aspectRatio is 1:1, 16:9, or 4:3
   const fittedEditorBox = useMemo(() => {
@@ -1200,7 +1309,10 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     setBattlerConfig(
       preset.battlerConfig
         ? { ...DEFAULT_BATTLER_CONFIG, ...preset.battlerConfig }
-        : { ...DEFAULT_BATTLER_CONFIG }
+        : {
+            ...DEFAULT_BATTLER_CONFIG,
+            randomWeaponSpawn: preset.trackType === 'battler',
+          }
     );
     setCorridors(JSON.parse(JSON.stringify(preset.corridors)));
     setGates(JSON.parse(JSON.stringify(preset.gates)));
@@ -1319,12 +1431,27 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     setIsFinishSelected(false);
   };
 
-  // Canvas zoom with mouse wheel or two-finger pinch gesture (wide zoom range for limitless tracks)
+  // Cursor-centered canvas zoom with mouse wheel or trackpad pan
   const touchPinchDistRef = useRef<number | null>(null);
   const handleCanvasWheel = (e: React.WheelEvent) => {
     e.preventDefault();
-    const factor = e.deltaY < 0 ? 1.15 : 0.87;
-    setCanvasZoom(prev => Math.max(0.08, Math.min(6.0, Math.round(prev * factor * 100) / 100)));
+    const factor = e.deltaY < 0 ? 1.14 : 0.88;
+    const nextZoom = Math.max(0.08, Math.min(6.0, Math.round(canvasZoom * factor * 100) / 100));
+    if (nextZoom === canvasZoom) return;
+
+    if (svgRef.current) {
+      const rect = svgRef.current.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        const normX = (e.clientX - rect.left) / rect.width - 0.5;
+        const normY = (e.clientY - rect.top) / rect.height - 0.5;
+        const zoomRatio = 1 - canvasZoom / nextZoom;
+        setCanvasPan(prev => ({
+          x: Math.round((prev.x + normX * viewW * zoomRatio) * 10) / 10,
+          y: Math.round((prev.y + normY * viewH * zoomRatio) * 10) / 10,
+        }));
+      }
+    }
+    setCanvasZoom(nextZoom);
   };
 
   const handleCanvasTouchMove = (e: React.TouchEvent) => {
@@ -1348,8 +1475,28 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     touchPinchDistRef.current = null;
   };
 
+  // Start canvas pan immediately if Spacebar is held or Middle Mouse Button is pressed
+  const tryStartPanOverride = (e: React.PointerEvent<any>): boolean => {
+    if (isSpacePressed || e.button === 1) {
+      e.stopPropagation();
+      e.preventDefault();
+      if (svgRef.current) {
+        cachedSvgRectRef.current = svgRef.current.getBoundingClientRect();
+      }
+      setPanDragState({
+        startClientX: e.clientX,
+        startClientY: e.clientY,
+        startPanX: canvasPan.x,
+        startPanY: canvasPan.y,
+      });
+      return true;
+    }
+    return false;
+  };
+
   // Generic tool placement handler for any pointer event on canvas or child items (no coordinate clamps)
   const handleItemToolPlacement = (e: React.PointerEvent<any>) => {
+    if (tryStartPanOverride(e)) return true;
     if (editorMode === 'draw') {
       const { x, y } = getSVGCoords(e);
       handleAddCorridor(Math.round((x - 45) / 5) * 5, Math.round((y - 30) / 5) * 5, 90, 60, false, 'right', 'rect');
@@ -1740,6 +1887,60 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
   const activeRacersCount = teamList.filter(t => t.enabled !== false).length;
   const isObjectSelected = selectedCorridorIdx !== null || selectedGateIdx !== null || selectedPickupIdx !== null;
 
+  // Memoize static SVG corridor shadow and border layers so dragging gates/barriers/pickups/spawns does not re-create them
+  const memoizedCorridorBackdrop = useMemo(
+    () => (
+      <g pointerEvents="none">
+        {/* 1. Track Shadow Layer (Supports Rect & Circle Rooms) */}
+        {corridors.map((c, i) =>
+          c.shape === 'circle' ? (
+            <ellipse
+              key={`sh_${i}`}
+              cx={c.x + c.w / 2 + 4}
+              cy={c.y + c.h / 2 + 5}
+              rx={Math.max(4, c.w / 2)}
+              ry={Math.max(4, c.h / 2)}
+              fill="rgba(15,23,42,0.3)"
+            />
+          ) : (
+            <rect
+              key={`sh_${i}`}
+              x={c.x + 4}
+              y={c.y + 5}
+              width={c.w}
+              height={c.h}
+              fill="rgba(15,23,42,0.3)"
+            />
+          )
+        )}
+
+        {/* 2. Track Cutout Border (Supports Rect & Circle Rooms) */}
+        {corridors.map((c, i) =>
+          c.shape === 'circle' ? (
+            <ellipse
+              key={`br_${i}`}
+              cx={c.x + c.w / 2}
+              cy={c.y + c.h / 2}
+              rx={Math.max(4, c.w / 2 + 2.5)}
+              ry={Math.max(4, c.h / 2 + 2.5)}
+              fill="#0f172a"
+            />
+          ) : (
+            <rect
+              key={`br_${i}`}
+              x={c.x - 2.5}
+              y={c.y - 2.5}
+              width={c.w + 5}
+              height={c.h + 5}
+              fill="#0f172a"
+            />
+          )
+        )}
+      </g>
+    ),
+    [corridors]
+  );
+
   return (
     <HistoryContext.Provider value={pushSnapshot}>
     <div className="flex flex-col w-full h-dvh p-1.5 sm:p-3 select-none overflow-hidden">
@@ -1813,7 +2014,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
 
         {/* TAB 1: VISUAL DRAG-AND-DROP TRACK BUILDER */}
         {activeTab === 'track' && (
-          <div className="flex-1 flex flex-col landscape:flex-row lg:flex-row gap-2.5 overflow-hidden min-h-0">
+          <div className="flex-1 flex flex-col landscape:flex-row lg:flex-row gap-1.5 overflow-hidden min-h-0">
             {/* Outer Stage Wrapper supporting 1:1, 16:9, 4:3, or Full Auto aspect ratio */}
             <div
               ref={canvasStageRef}
@@ -1842,7 +2043,11 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                 shapeRendering="geometricPrecision"
                 textRendering="geometricPrecision"
                 className={`w-full h-full block select-none touch-none ${
-                  editorMode === 'select' ? 'cursor-grab active:cursor-grabbing' : 'cursor-crosshair'
+                  isSpacePressed || panDragState
+                    ? 'cursor-grabbing'
+                    : editorMode === 'select'
+                    ? 'cursor-grab active:cursor-grabbing'
+                    : 'cursor-crosshair'
                 }`}
                 onPointerDown={handlePointerDownSVG}
                 onPointerMove={handlePointerMoveSVG}
@@ -1865,39 +2070,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                   pointerEvents="none"
                 />
 
-                {/* 1. Track Shadow Layer (Supports Rect & Circle Rooms) */}
-                {corridors.map((c, i) =>
-                  c.shape === 'circle' ? (
-                    <ellipse
-                      key={`sh_${i}`}
-                      cx={c.x + c.w / 2 + 4}
-                      cy={c.y + c.h / 2 + 5}
-                      rx={Math.max(4, c.w / 2)}
-                      ry={Math.max(4, c.h / 2)}
-                      fill="rgba(15,23,42,0.3)"
-                      pointerEvents="none"
-                    />
-                  ) : (
-                    <rect key={`sh_${i}`} x={c.x + 4} y={c.y + 5} width={c.w} height={c.h} fill="rgba(15,23,42,0.3)" pointerEvents="none" />
-                  )
-                )}
-
-                {/* 2. Track Cutout Border (Supports Rect & Circle Rooms) */}
-                {corridors.map((c, i) =>
-                  c.shape === 'circle' ? (
-                    <ellipse
-                      key={`br_${i}`}
-                      cx={c.x + c.w / 2}
-                      cy={c.y + c.h / 2}
-                      rx={Math.max(4, c.w / 2 + 2.5)}
-                      ry={Math.max(4, c.h / 2 + 2.5)}
-                      fill="#0f172a"
-                      pointerEvents="none"
-                    />
-                  ) : (
-                    <rect key={`br_${i}`} x={c.x - 2.5} y={c.y - 2.5} width={c.w + 5} height={c.h + 5} fill="#0f172a" pointerEvents="none" />
-                  )
-                )}
+                {/* 1 & 2. Memoized Track Shadow & Cutout Border Layers */}
+                {memoizedCorridorBackdrop}
 
                 {/* 3. Walkable Corridors & Circle Rooms (Normal or Moving Wall) */}
                 {corridors.map((c, i) => {
@@ -1968,26 +2142,106 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         />
                       )}
 
-                      {/* Moving wall indicator badge and directional arrow */}
-                      {hasWall && (
-                        <g pointerEvents="none" opacity={0.85}>
+                      {/* Moving wall origin bar, directional flow chevrons & stage order badge */}
+                      {hasWall && (() => {
+                        const orderNum = c.wallOrder !== undefined ? c.wallOrder : i + 1;
+                        const wallSpd = c.wallSpeed || 55;
+                        const wallDly = c.wallDelay || 0;
+                        const cx = c.x + c.w / 2;
+                        const cy = c.y + c.h / 2;
+                        const rotDeg =
+                          wallDir === 'right'
+                            ? 0
+                            : wallDir === 'down'
+                            ? 90
+                            : wallDir === 'left'
+                            ? 180
+                            : 270;
+                        const originX =
+                          wallDir === 'left' ? c.x + c.w - 5 : c.x;
+                        const originY =
+                          wallDir === 'up' ? c.y + c.h - 5 : c.y;
+                        const originW =
+                          wallDir === 'left' || wallDir === 'right' ? 5 : c.w;
+                        const originH =
+                          wallDir === 'up' || wallDir === 'down' ? 5 : c.h;
+                        const badgeText = `STAGE #${orderNum} · ${wallDir.toUpperCase()} · ${wallSpd}px/s${
+                          wallDly > 0 ? ` (+${wallDly}s)` : ''
+                        }`;
+                        const badgeW = Math.min(Math.max(82, badgeText.length * 4.5 + 8), Math.max(66, c.w - 6));
+
+                        return (
+                          <g pointerEvents="none" opacity={0.9}>
+                            {/* Cyan Starting Edge Bar */}
+                            <rect
+                              x={originX}
+                              y={originY}
+                              width={originW}
+                              height={originH}
+                              fill="#06b6d4"
+                              opacity={0.75}
+                            />
+                            {/* Directional Flow Arrows / Chevrons */}
+                            <g transform={`translate(${cx}, ${cy}) rotate(${rotDeg})`} opacity={0.45}>
+                              {[-22, 0, 22].map((offset, chIdx) => (
+                                <polyline
+                                  key={`chv_${chIdx}`}
+                                  points={`${offset - 5},-7 ${offset + 3},0 ${offset - 5},7`}
+                                  fill="none"
+                                  stroke="#0284c7"
+                                  strokeWidth="2.2"
+                                  strokeLinecap="round"
+                                  strokeLinejoin="round"
+                                />
+                              ))}
+                            </g>
+                            {/* Stage Order, Direction & Speed Badge */}
+                            <rect
+                              x={c.x + 4}
+                              y={c.y + 4}
+                              width={badgeW}
+                              height={15}
+                              rx={3}
+                              fill="#0284c7"
+                              stroke="#0f172a"
+                              strokeWidth="0.9"
+                            />
+                            <text
+                              x={c.x + 4 + badgeW / 2}
+                              y={c.y + 14.2}
+                              textAnchor="middle"
+                              fill="#ffffff"
+                              fontSize="7.2"
+                              fontWeight="900"
+                            >
+                              {badgeText}
+                            </text>
+                          </g>
+                        );
+                      })()}
+
+                      {/* Corridor Gun Auto-Spawn Indicator Badge */}
+                      {c.gunSpawner?.enabled && (
+                        <g pointerEvents="none" opacity={0.92}>
                           <rect
                             x={c.x + 4}
-                            y={c.y + 4}
-                            width={58}
+                            y={c.y + (hasWall ? 22 : 4)}
+                            width={Math.min(Math.max(66, c.w - 8), 114)}
                             height={15}
                             rx={3}
-                            fill="#0284c7"
+                            fill="#e11d48"
+                            stroke="#0f172a"
+                            strokeWidth="1"
                           />
                           <text
-                            x={c.x + 33}
-                            y={c.y + 15}
+                            x={c.x + 4 + Math.min(Math.max(66, c.w - 8), 114) / 2}
+                            y={c.y + (hasWall ? 32.5 : 14.5)}
                             textAnchor="middle"
                             fill="#ffffff"
-                            fontSize="8"
-                            fontWeight="bold"
+                            fontSize="7.5"
+                            fontWeight="900"
                           >
-                            WALL {wallDir.toUpperCase()}
+                            GUN SPAWN x{c.gunSpawner.damageMultiplier ?? 1}D/x{c.gunSpawner.ammoMultiplier ?? 1}A
                           </text>
                         </g>
                       )}
@@ -2156,10 +2410,27 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                   );
                 })}
 
-                {/* 6. Static and Moving Barriers (Horizontal & Vertical) */}
+                {/* 6. Static and Moving Barriers (with Dashed Trajectory Path & Ghost Endpoint Previews) */}
                 {barriers.map((b, i) => {
                   const isSelected = selectedBarrierIdx === i;
                   const isVert = b.h > b.w;
+                  const isMoving = b.movement !== 'static';
+                  const dist = b.distance || 60;
+                  const dx =
+                    b.movement === 'horizontal' ||
+                    b.movement === 'diagonal_up' ||
+                    b.movement === 'diagonal_down'
+                      ? dist
+                      : 0;
+                  const dy =
+                    b.movement === 'vertical' || b.movement === 'diagonal_down'
+                      ? dist
+                      : b.movement === 'diagonal_up'
+                      ? -dist
+                      : 0;
+                  const cx = b.x + b.w / 2;
+                  const cy = b.y + b.h / 2;
+
                   return (
                     <g
                       key={`barr_${i}`}
@@ -2192,6 +2463,64 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         });
                       }}
                     >
+                      {/* Moving Barrier Dashed Trajectory Line & Ghost Endpoint Boxes */}
+                      {isMoving && (dx !== 0 || dy !== 0) && (
+                        <g pointerEvents="none" opacity={isSelected ? 0.95 : 0.65}>
+                          {/* Ghost Box at -Distance */}
+                          <rect
+                            x={b.x - dx}
+                            y={b.y - dy}
+                            width={b.w}
+                            height={b.h}
+                            fill="rgba(245, 158, 11, 0.14)"
+                            stroke={isSelected ? '#0284c7' : '#d97706'}
+                            strokeWidth="1.3"
+                            strokeDasharray="3 2.5"
+                            rx={2}
+                          />
+                          {/* Ghost Box at +Distance */}
+                          <rect
+                            x={b.x + dx}
+                            y={b.y + dy}
+                            width={b.w}
+                            height={b.h}
+                            fill="rgba(245, 158, 11, 0.14)"
+                            stroke={isSelected ? '#0284c7' : '#d97706'}
+                            strokeWidth="1.3"
+                            strokeDasharray="3 2.5"
+                            rx={2}
+                          />
+                          {/* Dashed Travel Path Centerline */}
+                          <line
+                            x1={cx - dx}
+                            y1={cy - dy}
+                            x2={cx + dx}
+                            y2={cy + dy}
+                            stroke={isSelected ? '#0284c7' : '#b45309'}
+                            strokeWidth="1.6"
+                            strokeDasharray="4 3"
+                          />
+                          {/* Endpoint Pivot Dots */}
+                          <circle cx={cx - dx} cy={cy - dy} r="2.6" fill="#f59e0b" stroke="#0f172a" strokeWidth="1" />
+                          <circle cx={cx + dx} cy={cy + dy} r="2.6" fill="#f59e0b" stroke="#0f172a" strokeWidth="1" />
+                          {isSelected && (
+                            <text
+                              x={cx}
+                              y={b.y - 6}
+                              textAnchor="middle"
+                              fill="#ffffff"
+                              stroke="#0f172a"
+                              strokeWidth="2.4"
+                              paintOrder="stroke"
+                              fontSize="7.2"
+                              fontWeight="900"
+                            >
+                              ±{dist}px · {b.speed || 40}px/s
+                            </text>
+                          )}
+                        </g>
+                      )}
+
                       <rect
                         x={b.x}
                         y={b.y}
@@ -2233,14 +2562,34 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                     p.type === 'scar';
                   const pickupFill =
                     p.type === 'knife'
-                      ? '#f1f5f9'
-                      : isGun
-                      ? '#fde047'
+                      ? '#f8fafc'
+                      : p.type === 'uzi'
+                      ? '#fed7aa'
+                      : p.type === 'ump'
+                      ? '#bae6fd'
+                      : p.type === 'ak'
+                      ? '#fecaca'
+                      : p.type === 'mini14'
+                      ? '#bbf7d0'
+                      : p.type === 'scar'
+                      ? '#fef08a'
                       : p.type === 'shield'
                       ? '#38bdf8'
                       : p.type === 'star_dash'
                       ? '#facc15'
                       : '#ef4444';
+                  const topGunName =
+                    p.type === 'uzi'
+                      ? 'UZI'
+                      : p.type === 'ump'
+                      ? 'UMP-45'
+                      : p.type === 'ak'
+                      ? 'AK-47'
+                      : p.type === 'mini14'
+                      ? 'MINI 14'
+                      : p.type === 'scar'
+                      ? 'SCAR-L'
+                      : '';
                   const shortTag =
                     p.type === 'uzi'
                       ? 'UZI'
@@ -2296,22 +2645,54 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                       <circle
                         cx={p.x}
                         cy={p.y}
-                        r="11"
+                        r="12"
                         fill={pickupFill}
                         stroke={isSelected ? '#0284c7' : '#0f172a'}
-                        strokeWidth={isSelected ? '3' : '2'}
+                        strokeWidth={isSelected ? '3' : '2.2'}
                       />
-                      <text
-                        x={p.x}
-                        y={p.y + 3}
-                        textAnchor="middle"
-                        fill="#0f172a"
-                        fontSize="6.8"
-                        fontWeight="900"
-                        pointerEvents="none"
-                      >
-                        {shortTag}
-                      </text>
+                      {/* Mini SVG Silhouette inside Pickup Circle for Guns & Knife */}
+                      {isGun ? (
+                        <g transform={`translate(${p.x}, ${p.y}) rotate(-20)`} pointerEvents="none">
+                          <rect x="-6.5" y="-2.5" width="10.5" height="3.8" rx="0.8" fill="#1e293b" stroke="#0f172a" strokeWidth="1" />
+                          <rect x="-2" y="1" width="2.6" height="4.8" fill="#334155" stroke="#0f172a" strokeWidth="0.9" />
+                          <rect x="4" y="-1.8" width="4.2" height="1.8" fill="#64748b" stroke="#0f172a" strokeWidth="0.9" />
+                        </g>
+                      ) : p.type === 'knife' ? (
+                        <g transform={`translate(${p.x}, ${p.y}) rotate(-30)`} pointerEvents="none">
+                          <rect x="-7.5" y="-1.6" width="5.5" height="3.2" rx="0.8" fill="#1e293b" stroke="#0f172a" strokeWidth="1" />
+                          <polygon points="-2,-2.6 7.5,0 -2,2.6" fill="#e2e8f0" stroke="#0f172a" strokeWidth="1" />
+                        </g>
+                      ) : (
+                        <text
+                          x={p.x}
+                          y={p.y + 3}
+                          textAnchor="middle"
+                          fill="#0f172a"
+                          fontSize="6.8"
+                          fontWeight="900"
+                          pointerEvents="none"
+                        >
+                          {shortTag}
+                        </text>
+                      )}
+                      {/* Top Gun Name Text above Gun Pickups */}
+                      {isGun && topGunName && (
+                        <text
+                          x={p.x}
+                          y={p.y - 15.5}
+                          textAnchor="middle"
+                          fill="#ffffff"
+                          stroke="#0f172a"
+                          strokeWidth="2.6"
+                          paintOrder="stroke"
+                          fontSize="7.8"
+                          fontWeight="900"
+                          pointerEvents="none"
+                        >
+                          {topGunName}
+                          {p.damageMultiplier && p.damageMultiplier !== 1 ? ` x${p.damageMultiplier}` : ''}
+                        </text>
+                      )}
                     </g>
                   );
                 })}
@@ -2561,12 +2942,85 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                   />
                 </g>
               </svg>
+
+              {/* Bottom-left Canvas Navigation Status & Quick Reset Pill */}
+              <div className="absolute bottom-2 left-2 z-20 flex items-center gap-1.5 pointer-events-auto">
+                <div className="bg-slate-900/85 text-white border border-slate-950 rounded-md px-2 py-0.5 text-[9.5px] font-bold flex items-center gap-1.5 shadow-xs backdrop-blur-xs">
+                  <Move className="w-2.5 h-2.5 text-amber-300 shrink-0" />
+                  <span>
+                    {isSpacePressed
+                      ? 'SPACE PAN ACTIVE — Drag anywhere'
+                      : 'Hold Space or Middle-Click to Pan · Scroll to Zoom'}
+                  </span>
+                </div>
+                {(Math.abs(canvasZoom - 1.0) > 0.02 || Math.abs(canvasPan.x) > 2 || Math.abs(canvasPan.y) > 2) && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCanvasZoom(1.0);
+                      setCanvasPan({ x: 0, y: 0 });
+                    }}
+                    className="paper-btn bg-amber-300 hover:bg-amber-200 text-slate-950 px-2 py-0.5 text-[9.5px] font-black shadow-xs cursor-pointer"
+                    title="Reset Canvas Zoom & Pan"
+                  >
+                    Reset View ({Math.round(canvasZoom * 100)}%)
+                  </button>
+                )}
+              </div>
+
+              {/* Floating Restore Button when Inspector Sidebar is Collapsed */}
+              {isInspectorCollapsed && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    Sound.play('button_click');
+                    setIsInspectorCollapsed(false);
+                  }}
+                  className="hidden landscape:flex lg:flex absolute top-2.5 right-2.5 z-30 paper-btn bg-amber-300 hover:bg-amber-400 text-slate-950 px-2.5 py-1 text-[10px] font-black items-center gap-1.5 shadow-[2px_3px_0px_#0f172a] cursor-pointer"
+                  title="Expand Track Inspector Sidebar"
+                >
+                  <ArrowLeft className="w-3.5 h-3.5 stroke-[2.5]" />
+                  <span>Open Inspector</span>
+                </button>
+              )}
             </div>
             </div>
 
-            {/* Properties & Object Browser Inspector: Docked right in landscape/desktop, adjustable bottom drawer in portrait */}
+            {/* Interactive Resizable Splitter Handle (Desktop / Landscape) */}
+            {!isInspectorCollapsed && (
+              <div
+                onPointerDown={(e) => {
+                  e.preventDefault();
+                  inspectorResizeStartRef.current = {
+                    startX: e.clientX,
+                    startW: inspectorWidth,
+                  };
+                  setIsResizingInspector(true);
+                }}
+                onDoubleClick={() => setInspectorWidth(380)}
+                className={`hidden landscape:flex lg:flex w-2.5 shrink-0 flex-col items-center justify-center cursor-col-resize group select-none rounded transition-colors ${
+                  isResizingInspector ? 'bg-amber-300/80' : 'hover:bg-slate-300/80'
+                }`}
+                title="Drag to resize Track Inspector · Double-click to reset width (380px)"
+              >
+                <div
+                  className={`w-1 h-12 rounded-full border border-slate-900 transition-colors ${
+                    isResizingInspector
+                      ? 'bg-slate-950'
+                      : 'bg-slate-400 group-hover:bg-amber-400'
+                  }`}
+                />
+              </div>
+            )}
+
+            {/* Properties & Object Browser Inspector: Resizable & Collapsible in landscape/desktop, adjustable bottom drawer in portrait */}
             <div
-              className={`w-full landscape:w-80 lg:w-88 xl:w-96 flex flex-col overflow-hidden bg-slate-50 border-2 border-slate-900 rounded-lg p-2 sm:p-2.5 shadow-sm shrink-0 transition-all duration-200 ${
+              style={{ width: isInspectorCollapsed ? 0 : `${inspectorWidth}px` }}
+              className={`max-lg:portrait:!w-full flex flex-col overflow-hidden bg-slate-50 border-2 border-slate-900 rounded-lg p-2 sm:p-2.5 shadow-sm shrink-0 transition-[height,opacity] duration-200 ${
+                isInspectorCollapsed
+                  ? 'landscape:hidden lg:hidden'
+                  : ''
+              } ${
                 portraitDrawerMode === 'collapsed'
                   ? 'h-[40px]'
                   : portraitDrawerMode === 'compact'
@@ -2584,7 +3038,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                   </span>
                 </div>
 
-                {/* Save Inspector Changes Button + Portrait Drawer Toggle */}
+                {/* Save Inspector Changes Button + Collapse Sidebar + Portrait Drawer Toggle */}
                 <div className="flex items-center gap-1 shrink-0">
                   {saveToast && (
                     <span className="bg-emerald-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-xs truncate max-w-[110px] flex items-center gap-0.5">
@@ -2599,6 +3053,17 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                   >
                     <Save className="w-3 h-3 stroke-[2.5]" />
                     <span>Save</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      Sound.play('button_click');
+                      setIsInspectorCollapsed(true);
+                    }}
+                    className="hidden landscape:flex lg:flex paper-btn bg-white hover:bg-slate-100 text-[9.5px] px-1.5 py-0.5 font-black text-slate-700 items-center gap-0.5 cursor-pointer"
+                    title="Collapse Inspector Sidebar to maximize Canvas"
+                  >
+                    <ArrowRight className="w-3 h-3 stroke-[2.5]" />
                   </button>
                   <button
                     type="button"
@@ -3979,6 +4444,277 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                       </div>
                     )}
 
+                    {/* Corridor Gun Auto-Spawn System (Per-Corridor Gun Spawner) */}
+                    <div className="border-t border-amber-200 pt-1.5 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-slate-800 font-extrabold text-[11px] flex items-center gap-1">
+                          <Crosshair className="w-3.5 h-3.5 text-rose-600" />
+                          <span>Corridor Gun Auto-Spawn:</span>
+                        </span>
+                        <span
+                          className={`text-[9px] font-black px-1.5 py-0.5 rounded border border-slate-900 ${
+                            corridors[selectedCorridorIdx].gunSpawner?.enabled
+                              ? 'bg-rose-500 text-white'
+                              : 'bg-slate-200 text-slate-700'
+                          }`}
+                        >
+                          {corridors[selectedCorridorIdx].gunSpawner?.enabled ? 'ACTIVE IN THIS CORRIDOR' : 'OFF'}
+                        </span>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            pushSnapshot();
+                            setCorridors(prev => {
+                              const u = [...prev];
+                              const curGs = u[selectedCorridorIdx].gunSpawner;
+                              u[selectedCorridorIdx] = {
+                                ...u[selectedCorridorIdx],
+                                gunSpawner: {
+                                  ...(curGs || {}),
+                                  enabled: false,
+                                },
+                              };
+                              return u;
+                            });
+                          }}
+                          className={`paper-btn text-[10px] py-1 font-black cursor-pointer ${
+                            !corridors[selectedCorridorIdx].gunSpawner?.enabled
+                              ? '!bg-slate-800 !text-white'
+                              : 'bg-white text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          Gun Spawn: OFF
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            pushSnapshot();
+                            setBattlerConfig(prev => ({ ...prev, randomWeaponSpawn: true }));
+                            setCorridors(prev => {
+                              const u = [...prev];
+                              const curGs = u[selectedCorridorIdx].gunSpawner;
+                              u[selectedCorridorIdx] = {
+                                ...u[selectedCorridorIdx],
+                                gunSpawner: {
+                                  enabled: true,
+                                  allowedGuns:
+                                    curGs?.allowedGuns && curGs.allowedGuns.length > 0
+                                      ? curGs.allowedGuns
+                                      : [...DEFAULT_ALLOWED_GUNS],
+                                  damageMultiplier: curGs?.damageMultiplier ?? 1.0,
+                                  ammoMultiplier: curGs?.ammoMultiplier ?? 1.0,
+                                  fireRateMultiplier: curGs?.fireRateMultiplier ?? 1.0,
+                                  spawnInterval: curGs?.spawnInterval ?? 3.5,
+                                  maxActiveGuns: curGs?.maxActiveGuns ?? 3,
+                                },
+                              };
+                              return u;
+                            });
+                          }}
+                          className={`paper-btn text-[10px] py-1 font-black flex items-center justify-center gap-1 cursor-pointer ${
+                            corridors[selectedCorridorIdx].gunSpawner?.enabled
+                              ? '!bg-rose-500 !text-white'
+                              : 'bg-white text-slate-700 hover:bg-slate-100'
+                          }`}
+                        >
+                          <Crosshair className="w-3 h-3" />
+                          <span>Gun Spawn: ON</span>
+                        </button>
+                      </div>
+
+                      {corridors[selectedCorridorIdx].gunSpawner?.enabled && (
+                        <div className="bg-rose-50/95 border border-rose-300 rounded p-2 space-y-2">
+                          <div>
+                            <div className="flex items-center justify-between mb-1">
+                              <span className="text-[10px] font-black text-rose-950 uppercase">
+                                What Guns Can Spawn Here:
+                              </span>
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  pushSnapshot();
+                                  setCorridors(prev => {
+                                    const u = [...prev];
+                                    const curGs = u[selectedCorridorIdx].gunSpawner!;
+                                    u[selectedCorridorIdx] = {
+                                      ...u[selectedCorridorIdx],
+                                      gunSpawner: {
+                                        ...curGs,
+                                        allowedGuns: ['uzi', 'ump', 'ak', 'mini14', 'scar', 'knife'],
+                                      },
+                                    };
+                                    return u;
+                                  });
+                                }}
+                                className="paper-btn bg-white hover:bg-rose-100 text-[9px] px-1.5 py-0.5 font-black text-slate-800 cursor-pointer"
+                              >
+                                Select All
+                              </button>
+                            </div>
+                            <div className="grid grid-cols-3 gap-1">
+                              {(
+                                [
+                                  { id: 'uzi', label: 'UZI', color: 'bg-orange-400 text-slate-950' },
+                                  { id: 'ump', label: 'UMP-45', color: 'bg-sky-400 text-slate-950' },
+                                  { id: 'ak', label: 'AK-47', color: 'bg-red-500 text-white' },
+                                  { id: 'mini14', label: 'MINI 14', color: 'bg-emerald-500 text-white' },
+                                  { id: 'scar', label: 'SCAR-L', color: 'bg-amber-300 text-slate-950' },
+                                  { id: 'knife', label: 'KNIFE', color: 'bg-slate-700 text-white' },
+                                ] as { id: WeaponType; label: string; color: string }[]
+                              ).map(w => {
+                                const currentList =
+                                  corridors[selectedCorridorIdx].gunSpawner?.allowedGuns ||
+                                  DEFAULT_ALLOWED_GUNS;
+                                const isAllowed = currentList.includes(w.id);
+                                return (
+                                  <button
+                                    key={w.id}
+                                    type="button"
+                                    onClick={() => {
+                                      pushSnapshot();
+                                      setCorridors(prev => {
+                                        const u = [...prev];
+                                        const curGs = u[selectedCorridorIdx].gunSpawner!;
+                                        const list = curGs.allowedGuns || [...DEFAULT_ALLOWED_GUNS];
+                                        const nextList = list.includes(w.id)
+                                          ? list.length > 1
+                                            ? list.filter(item => item !== w.id)
+                                            : list
+                                          : [...list, w.id];
+                                        u[selectedCorridorIdx] = {
+                                          ...u[selectedCorridorIdx],
+                                          gunSpawner: {
+                                            ...curGs,
+                                            allowedGuns: nextList,
+                                          },
+                                        };
+                                        return u;
+                                      });
+                                    }}
+                                    className={`paper-btn text-[9.5px] py-1 font-black flex items-center justify-center gap-1 cursor-pointer ${
+                                      isAllowed
+                                        ? w.color
+                                        : 'bg-white text-slate-400 opacity-65 hover:opacity-100'
+                                    }`}
+                                  >
+                                    {w.id === 'knife' ? (
+                                      <Sword className="w-2.5 h-2.5" />
+                                    ) : (
+                                      <Crosshair className="w-2.5 h-2.5" />
+                                    )}
+                                    <span>{w.label}</span>
+                                  </button>
+                                );
+                              })}
+                            </div>
+                          </div>
+
+                          <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-rose-200">
+                            <NumberStepper
+                              label="Damage Mult"
+                              unit="x"
+                              value={corridors[selectedCorridorIdx].gunSpawner?.damageMultiplier ?? 1.0}
+                              min={0.25}
+                              max={10}
+                              step={0.25}
+                              onChange={(val) => {
+                                setCorridors(prev => {
+                                  const u = [...prev];
+                                  const curGs = u[selectedCorridorIdx].gunSpawner!;
+                                  u[selectedCorridorIdx] = {
+                                    ...u[selectedCorridorIdx],
+                                    gunSpawner: { ...curGs, damageMultiplier: val },
+                                  };
+                                  return u;
+                                });
+                              }}
+                            />
+                            <NumberStepper
+                              label="Ammo Mult"
+                              unit="x"
+                              value={corridors[selectedCorridorIdx].gunSpawner?.ammoMultiplier ?? 1.0}
+                              min={0.5}
+                              max={10}
+                              step={0.5}
+                              onChange={(val) => {
+                                setCorridors(prev => {
+                                  const u = [...prev];
+                                  const curGs = u[selectedCorridorIdx].gunSpawner!;
+                                  u[selectedCorridorIdx] = {
+                                    ...u[selectedCorridorIdx],
+                                    gunSpawner: { ...curGs, ammoMultiplier: val },
+                                  };
+                                  return u;
+                                });
+                              }}
+                            />
+                            <NumberStepper
+                              label="Fire Rate"
+                              unit="x"
+                              value={corridors[selectedCorridorIdx].gunSpawner?.fireRateMultiplier ?? 1.0}
+                              min={0.5}
+                              max={3}
+                              step={0.25}
+                              onChange={(val) => {
+                                setCorridors(prev => {
+                                  const u = [...prev];
+                                  const curGs = u[selectedCorridorIdx].gunSpawner!;
+                                  u[selectedCorridorIdx] = {
+                                    ...u[selectedCorridorIdx],
+                                    gunSpawner: { ...curGs, fireRateMultiplier: val },
+                                  };
+                                  return u;
+                                });
+                              }}
+                            />
+                          </div>
+
+                          <div className="grid grid-cols-2 gap-1.5">
+                            <NumberStepper
+                              label="Spawn Interval"
+                              unit="s"
+                              value={corridors[selectedCorridorIdx].gunSpawner?.spawnInterval ?? 3.5}
+                              min={0.5}
+                              max={25}
+                              step={0.5}
+                              onChange={(val) => {
+                                setCorridors(prev => {
+                                  const u = [...prev];
+                                  const curGs = u[selectedCorridorIdx].gunSpawner!;
+                                  u[selectedCorridorIdx] = {
+                                    ...u[selectedCorridorIdx],
+                                    gunSpawner: { ...curGs, spawnInterval: val },
+                                  };
+                                  return u;
+                                });
+                              }}
+                            />
+                            <NumberStepper
+                              label="Max Active Guns"
+                              value={corridors[selectedCorridorIdx].gunSpawner?.maxActiveGuns ?? 3}
+                              min={1}
+                              max={20}
+                              step={1}
+                              onChange={(val) => {
+                                setCorridors(prev => {
+                                  const u = [...prev];
+                                  const curGs = u[selectedCorridorIdx].gunSpawner!;
+                                  u[selectedCorridorIdx] = {
+                                    ...u[selectedCorridorIdx],
+                                    gunSpawner: { ...curGs, maxActiveGuns: val },
+                                  };
+                                  return u;
+                                });
+                              }}
+                            />
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                     {/* Geometric Coordinate inputs (Limitless Arena) */}
                     <div className="border-t border-amber-200 pt-1.5 space-y-1.5">
                       <span className="block text-slate-700 font-extrabold text-[10px] uppercase">Corridor Bounds (Limitless)</span>
@@ -4754,6 +5490,80 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                           }}
                         />
                       </div>
+                      {/* Custom Weapon Multipliers for Selected Gun/Knife Pickup */}
+                      {(pickups[selectedPickupIdx].type === 'uzi' ||
+                        pickups[selectedPickupIdx].type === 'ump' ||
+                        pickups[selectedPickupIdx].type === 'ak' ||
+                        pickups[selectedPickupIdx].type === 'mini14' ||
+                        pickups[selectedPickupIdx].type === 'scar' ||
+                        pickups[selectedPickupIdx].type === 'knife') && (
+                        <div className="bg-white/90 border border-rose-200 rounded p-2 space-y-1.5">
+                          <span className="block text-[10px] font-black text-rose-950 uppercase">
+                            Pickup Weapon Multipliers
+                          </span>
+                          <div className="grid grid-cols-3 gap-1.5">
+                            <NumberStepper
+                              label="Damage Mult"
+                              unit="x"
+                              value={pickups[selectedPickupIdx].damageMultiplier ?? 1.0}
+                              min={0.25}
+                              max={10}
+                              step={0.25}
+                              onChange={(val) => {
+                                setPickups(prev => {
+                                  const u = [...prev];
+                                  u[selectedPickupIdx] = {
+                                    ...u[selectedPickupIdx],
+                                    damageMultiplier: val,
+                                  };
+                                  return u;
+                                });
+                              }}
+                            />
+                            {pickups[selectedPickupIdx].type !== 'knife' && (
+                              <>
+                                <NumberStepper
+                                  label="Ammo Mult"
+                                  unit="x"
+                                  value={pickups[selectedPickupIdx].ammoMultiplier ?? 1.0}
+                                  min={0.5}
+                                  max={10}
+                                  step={0.5}
+                                  onChange={(val) => {
+                                    setPickups(prev => {
+                                      const u = [...prev];
+                                      u[selectedPickupIdx] = {
+                                        ...u[selectedPickupIdx],
+                                        ammoMultiplier: val,
+                                      };
+                                      return u;
+                                    });
+                                  }}
+                                />
+                                <NumberStepper
+                                  label="Fire Rate"
+                                  unit="x"
+                                  value={pickups[selectedPickupIdx].fireRateMultiplier ?? 1.0}
+                                  min={0.5}
+                                  max={3}
+                                  step={0.25}
+                                  onChange={(val) => {
+                                    setPickups(prev => {
+                                      const u = [...prev];
+                                      u[selectedPickupIdx] = {
+                                        ...u[selectedPickupIdx],
+                                        fireRateMultiplier: val,
+                                      };
+                                      return u;
+                                    });
+                                  }}
+                                />
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-2 gap-2">
                         <NumberStepper
                           label="X Position"
@@ -5099,29 +5909,26 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                   </div>
                 </div>
               ) : (
-                /* VIEW F: NOTHING SELECTED -> SHOW ALL OBJECTS LIST */
-                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
-                  {/* Track Mode & Battler Settings Card */}
-                  <div className="paper-card bg-rose-50/90 p-2 border-2 border-slate-900 text-xs space-y-2">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[11px] font-black uppercase text-slate-900">
-                        Track Game Mode
+                /* VIEW F: NOTHING SELECTED -> SHOW ALL OBJECTS LIST IN COLLAPSIBLE ACCORDIONS */
+                <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                  {/* 1. Track Mode & Battler Settings Accordion */}
+                  <InspectorAccordion
+                    title="Track Game Mode"
+                    icon={
+                      trackType === 'battler' ? (
+                        <Swords className="w-3.5 h-3.5 text-rose-600" />
+                      ) : (
+                        <Flag className="w-3.5 h-3.5 text-emerald-700" />
+                      )
+                    }
+                    headerBgClass="bg-rose-50/90 hover:bg-rose-100/80"
+                    badge={
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded border border-slate-900 bg-white text-slate-900">
+                        {trackType === 'battler' ? 'BATTLER' : 'RACES'}
                       </span>
-                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded border border-slate-900 bg-white text-slate-900 flex items-center gap-1">
-                        {trackType === 'battler' ? (
-                          <>
-                            <Swords className="w-2.5 h-2.5 text-rose-600" />
-                            <span>BATTLER SURVIVAL</span>
-                          </>
-                        ) : (
-                          <>
-                            <Flag className="w-2.5 h-2.5 text-emerald-700" />
-                            <span>CLASSIC RACE</span>
-                          </>
-                        )}
-                      </span>
-                    </div>
-
+                    }
+                    defaultOpen={true}
+                  >
                     <div className="grid grid-cols-2 gap-1">
                       <button
                         type="button"
@@ -5159,7 +5966,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                     </div>
 
                     {trackType === 'battler' && (
-                      <div className="bg-white/95 p-2 rounded border border-rose-300 space-y-2">
+                      <div className="bg-rose-50/60 p-2 rounded border border-rose-200 space-y-2">
                         <div>
                           <span className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">
                             Battler Sub-Mode:
@@ -5180,7 +5987,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                                 className={`paper-btn text-[9px] py-1 font-black flex items-center justify-center gap-0.5 cursor-pointer ${
                                   battlerConfig.subMode === sm.id
                                     ? '!bg-slate-900 !text-white'
-                                    : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                                    : 'bg-white text-slate-800 hover:bg-slate-100'
                                 }`}
                               >
                                 {sm.icon}
@@ -5191,7 +5998,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         </div>
 
                         {battlerConfig.subMode === 'boss_fight' && (
-                          <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-slate-100">
+                          <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-rose-200/70">
                             <div>
                               <span className="block text-[9px] font-black text-slate-700 uppercase mb-0.5">
                                 Boss Racer
@@ -5224,29 +6031,9 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                           </div>
                         )}
 
-                        <div className="flex items-center justify-between pt-1 border-t border-slate-100">
-                          <label className="flex items-center gap-1.5 cursor-pointer select-none">
-                            <input
-                              type="checkbox"
-                              checked={battlerConfig.randomWeaponSpawn !== false}
-                              onChange={(e) =>
-                                setBattlerConfig(prev => ({
-                                  ...prev,
-                                  randomWeaponSpawn: e.target.checked,
-                                }))
-                              }
-                              className="w-3.5 h-3.5 accent-rose-600 rounded cursor-pointer"
-                            />
-                            <span className="text-[10px] font-extrabold text-slate-800 flex items-center gap-1">
-                              <Crosshair className="w-3 h-3 text-rose-600" />
-                              <span>Random Floor Weapon Spawner</span>
-                            </span>
-                          </label>
-                        </div>
-
-                        <div className="grid grid-cols-3 gap-1.5">
+                        <div className="pt-1 border-t border-rose-200/70">
                           <NumberStepper
-                            label="Default HP"
+                            label="Default Racer Health (HP)"
                             value={battlerConfig.defaultHp || 100}
                             min={20}
                             max={1000}
@@ -5255,12 +6042,254 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                               setBattlerConfig(prev => ({ ...prev, defaultHp: val }))
                             }
                           />
+                        </div>
+                      </div>
+                    )}
+                  </InspectorAccordion>
+
+                  {/* 2. Auto-Spawn Gun System Accordion */}
+                  <InspectorAccordion
+                    title="Auto-Spawn Gun System"
+                    icon={<Crosshair className="w-3.5 h-3.5 text-rose-600" />}
+                    headerBgClass="bg-rose-50/70 hover:bg-rose-100/70"
+                    badge={
+                      <span
+                        className={`text-[9px] font-black px-1.5 py-0.5 rounded border ${
+                          battlerConfig.randomWeaponSpawn
+                            ? 'bg-rose-500 text-white border-slate-900'
+                            : 'bg-slate-200 text-slate-700 border-slate-400'
+                        }`}
+                      >
+                        {battlerConfig.randomWeaponSpawn ? 'ON' : 'OFF'}
+                      </span>
+                    }
+                    defaultOpen={false}
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-extrabold text-slate-700">
+                        Global Floor Gun Spawner:
+                      </span>
+                      <div className="flex gap-1">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            pushSnapshot();
+                            setBattlerConfig(prev => ({ ...prev, randomWeaponSpawn: false }));
+                          }}
+                          className={`paper-btn text-[9px] px-2 py-0.5 font-black cursor-pointer ${
+                            !battlerConfig.randomWeaponSpawn
+                              ? '!bg-slate-800 !text-white'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          OFF
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            pushSnapshot();
+                            setBattlerConfig(prev => ({ ...prev, randomWeaponSpawn: true }));
+                          }}
+                          className={`paper-btn text-[9px] px-2 py-0.5 font-black cursor-pointer ${
+                            battlerConfig.randomWeaponSpawn
+                              ? '!bg-rose-500 !text-white'
+                              : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                          }`}
+                        >
+                          ON
+                        </button>
+                      </div>
+                    </div>
+
+                    {battlerConfig.randomWeaponSpawn && (
+                      <>
+                        {/* Select Specific Corridor(s) for Gun Spawning */}
+                        <div className="space-y-1 pt-1 border-t border-slate-100">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[9.5px] font-extrabold text-slate-700">
+                              Spawn Corridor Target:
+                            </span>
+                            {corridors.some(c => c.gunSpawner?.enabled) && (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  pushSnapshot();
+                                  setCorridors(prev =>
+                                    prev.map(c => ({
+                                      ...c,
+                                      gunSpawner: c.gunSpawner ? { ...c.gunSpawner, enabled: false } : undefined,
+                                    }))
+                                  );
+                                }}
+                                className="text-[8.5px] font-black text-rose-700 hover:underline cursor-pointer"
+                              >
+                                All Corridors
+                              </button>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-1 max-h-20 overflow-y-auto py-0.5">
+                            {corridors.map((c, cIdx) => {
+                              const isCEnabled = !!c.gunSpawner?.enabled;
+                              return (
+                                <div key={`gs_c_${cIdx}`} className="inline-flex items-center">
+                                  <button
+                                    type="button"
+                                    onClick={() => {
+                                      pushSnapshot();
+                                      setCorridors(prev => {
+                                        const u = [...prev];
+                                        const curGs = u[cIdx].gunSpawner;
+                                        u[cIdx] = {
+                                          ...u[cIdx],
+                                          gunSpawner: {
+                                            enabled: !isCEnabled,
+                                            allowedGuns:
+                                              curGs?.allowedGuns && curGs.allowedGuns.length > 0
+                                                ? curGs.allowedGuns
+                                                : [...DEFAULT_ALLOWED_GUNS],
+                                            damageMultiplier: curGs?.damageMultiplier ?? (battlerConfig.damageMultiplier || 1.0),
+                                            ammoMultiplier: curGs?.ammoMultiplier ?? (battlerConfig.ammoMultiplier || 1.0),
+                                            fireRateMultiplier: curGs?.fireRateMultiplier ?? (battlerConfig.fireRateMultiplier || 1.0),
+                                            spawnInterval: curGs?.spawnInterval ?? (battlerConfig.weaponSpawnInterval || 3.5),
+                                            maxActiveGuns: curGs?.maxActiveGuns ?? 3,
+                                          },
+                                        };
+                                        return u;
+                                      });
+                                    }}
+                                    className={`paper-btn text-[9px] px-1.5 py-0.5 font-black flex items-center gap-0.5 cursor-pointer ${
+                                      isCEnabled
+                                        ? '!bg-rose-500 !text-white'
+                                        : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                                    }`}
+                                    title={`Toggle Gun Auto-Spawn specifically on Corridor #${cIdx + 1}`}
+                                  >
+                                    <span>#{cIdx + 1}</span>
+                                    {isCEnabled && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                                  </button>
+                                  {isCEnabled && (
+                                    <button
+                                      type="button"
+                                      onClick={() => setSelectedCorridorIdx(cIdx)}
+                                      className="ml-0.5 text-[8.5px] font-black bg-amber-200 hover:bg-amber-300 text-slate-900 px-1 py-0.5 rounded border border-slate-900 cursor-pointer"
+                                      title={`Configure Corridor #${cIdx + 1} Gun Settings`}
+                                    >
+                                      Edit
+                                    </button>
+                                  )}
+                                </div>
+                              );
+                            })}
+                          </div>
+                          <span className="block text-[8.5px] text-slate-500 font-bold">
+                            {corridors.some(c => c.gunSpawner?.enabled)
+                              ? `Spawning specifically in Corridor(s): ${corridors
+                                  .map((c, idx) => (c.gunSpawner?.enabled ? `#${idx + 1}` : null))
+                                  .filter(Boolean)
+                                  .join(', ')}`
+                              : 'No specific corridor toggled — spawning across unflooded corridors.'}
+                          </span>
+                        </div>
+
+                        {/* Global Allowed Weapons Selector */}
+                        <div className="pt-1 border-t border-slate-100">
+                          <span className="block text-[9.5px] font-extrabold text-slate-700 mb-1">
+                            Allowed Guns to Spawn:
+                          </span>
+                          <div className="grid grid-cols-3 gap-1">
+                            {(
+                              [
+                                { id: 'uzi', label: 'UZI', color: 'bg-orange-400 text-slate-950' },
+                                { id: 'ump', label: 'UMP-45', color: 'bg-sky-400 text-slate-950' },
+                                { id: 'ak', label: 'AK-47', color: 'bg-red-500 text-white' },
+                                { id: 'mini14', label: 'MINI 14', color: 'bg-emerald-500 text-white' },
+                                { id: 'scar', label: 'SCAR-L', color: 'bg-amber-300 text-slate-950' },
+                                { id: 'knife', label: 'KNIFE', color: 'bg-slate-700 text-white' },
+                              ] as { id: WeaponType; label: string; color: string }[]
+                            ).map(w => {
+                              const currentPool =
+                                battlerConfig.allowedWeapons && battlerConfig.allowedWeapons.length > 0
+                                  ? battlerConfig.allowedWeapons
+                                  : DEFAULT_ALLOWED_GUNS;
+                              const isAllowed = currentPool.includes(w.id);
+                              return (
+                                <button
+                                  key={w.id}
+                                  type="button"
+                                  onClick={() => {
+                                    pushSnapshot();
+                                    const nextPool = isAllowed
+                                      ? currentPool.length > 1
+                                        ? currentPool.filter(item => item !== w.id)
+                                        : currentPool
+                                      : [...currentPool, w.id];
+                                    setBattlerConfig(prev => ({
+                                      ...prev,
+                                      allowedWeapons: nextPool,
+                                    }));
+                                  }}
+                                  className={`paper-btn text-[9px] py-0.5 font-black flex items-center justify-center gap-0.5 cursor-pointer ${
+                                    isAllowed
+                                      ? w.color
+                                      : 'bg-white text-slate-400 opacity-65 hover:opacity-100'
+                                  }`}
+                                >
+                                  {w.id === 'knife' ? (
+                                    <Sword className="w-2.5 h-2.5" />
+                                  ) : (
+                                    <Crosshair className="w-2.5 h-2.5" />
+                                  )}
+                                  <span>{w.label}</span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                        </div>
+
+                        {/* Global Damage, Ammo, Fire Rate Multipliers & Spawn Timing */}
+                        <div className="grid grid-cols-3 gap-1.5 pt-1 border-t border-slate-100">
+                          <NumberStepper
+                            label="Damage Mult"
+                            unit="x"
+                            value={battlerConfig.damageMultiplier ?? 1.0}
+                            min={0.25}
+                            max={10}
+                            step={0.25}
+                            onChange={(val) =>
+                              setBattlerConfig(prev => ({ ...prev, damageMultiplier: val }))
+                            }
+                          />
+                          <NumberStepper
+                            label="Ammo Mult"
+                            unit="x"
+                            value={battlerConfig.ammoMultiplier ?? 1.0}
+                            min={0.5}
+                            max={10}
+                            step={0.5}
+                            onChange={(val) =>
+                              setBattlerConfig(prev => ({ ...prev, ammoMultiplier: val }))
+                            }
+                          />
+                          <NumberStepper
+                            label="Fire Rate"
+                            unit="x"
+                            value={battlerConfig.fireRateMultiplier ?? 1.0}
+                            min={0.5}
+                            max={3}
+                            step={0.25}
+                            onChange={(val) =>
+                              setBattlerConfig(prev => ({ ...prev, fireRateMultiplier: val }))
+                            }
+                          />
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-1.5">
                           <NumberStepper
                             label="Spawn Interval"
                             unit="s"
                             value={battlerConfig.weaponSpawnInterval || 3.5}
-                            min={1}
-                            max={20}
+                            min={0.5}
+                            max={25}
                             step={0.5}
                             onChange={(val) =>
                               setBattlerConfig(prev => ({ ...prev, weaponSpawnInterval: val }))
@@ -5268,7 +6297,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                           />
                           <NumberStepper
                             label="Max Floor Guns"
-                            value={battlerConfig.maxFloorWeapons || 7}
+                            value={battlerConfig.maxFloorWeapons || 6}
                             min={1}
                             max={25}
                             step={1}
@@ -5277,67 +6306,76 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                             }
                           />
                         </div>
+                      </>
+                    )}
+                  </InspectorAccordion>
+
+                  {/* Quick Jump Row: Racer Spawn Zone & Finish Line Alcove */}
+                  <div className="grid grid-cols-1 gap-1.5">
+                    <div
+                      onClick={() => {
+                        clearSelection();
+                        setIsSpawnGroupSelected(true);
+                      }}
+                      className="paper-card bg-sky-50 hover:bg-sky-100 p-1.5 border-2 border-sky-800 flex items-center justify-between cursor-pointer"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Flag className="w-3.5 h-3.5 text-sky-700" />
+                        <span className="font-extrabold text-[11px] text-sky-950">Racer Spawn Zone</span>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <span className="text-[10px] font-mono text-sky-800 font-bold">
+                          {spawnBounds.cx},{spawnBounds.cy}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleAutoFitStartingBays();
+                          }}
+                          className="paper-btn bg-emerald-300 hover:bg-emerald-200 text-[9px] px-1.5 py-0.5 font-black text-slate-950"
+                          title="Automatically fit racer spawns into starting bays"
+                        >
+                          Auto-Fit
+                        </button>
+                      </div>
+                    </div>
+
+                    {trackType !== 'battler' && !hideFinishZone && (
+                      <div
+                        onClick={() => {
+                          clearSelection();
+                          setIsFinishSelected(true);
+                        }}
+                        className="paper-card bg-emerald-50 hover:bg-emerald-100 p-1.5 border-2 border-emerald-800 flex items-center justify-between cursor-pointer"
+                      >
+                        <div className="flex items-center gap-1.5">
+                          <Flag className="w-3.5 h-3.5 text-emerald-700" />
+                          <span className="font-extrabold text-[11px] text-emerald-950">Finish Line Alcove</span>
+                        </div>
+                        <span className="text-[10px] font-mono text-emerald-800 font-bold">
+                          {finishZone.x},{finishZone.y} ({finishZone.w}×{finishZone.h})
+                        </span>
                       </div>
                     )}
                   </div>
 
-                  {/* Racer Spawn Zone quick card */}
-                  <div
-                    onClick={() => {
-                      clearSelection();
-                      setIsSpawnGroupSelected(true);
-                    }}
-                    className="paper-card bg-sky-50 hover:bg-sky-100 p-1.5 border-2 border-sky-800 flex items-center justify-between cursor-pointer"
+                  {/* 3. Global Moving Wall Trigger Strategy Accordion */}
+                  <InspectorAccordion
+                    title="Wall Trigger Condition"
+                    icon={<Flame className="w-3.5 h-3.5 text-amber-700" />}
+                    headerBgClass="bg-amber-50 hover:bg-amber-100/80"
+                    badge={
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded border border-amber-800 bg-amber-200 text-amber-950 uppercase">
+                        {wallTriggerMode === 'gate_destroy'
+                          ? 'Gate Break'
+                          : wallTriggerMode === 'timer'
+                          ? `${wallTriggerTimer}s Timer`
+                          : wallTriggerMode}
+                      </span>
+                    }
+                    defaultOpen={false}
                   >
-                    <div className="flex items-center gap-1.5">
-                      <Flag className="w-3.5 h-3.5 text-sky-700" />
-                      <span className="font-extrabold text-[11px] text-sky-950">Racer Spawn Zone</span>
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-[10px] font-mono text-sky-800 font-bold">
-                        {spawnBounds.cx},{spawnBounds.cy}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleAutoFitStartingBays();
-                        }}
-                        className="paper-btn bg-emerald-300 hover:bg-emerald-200 text-[9px] px-1.5 py-0.5 font-black text-slate-950"
-                        title="Automatically fit racer spawns into starting bays"
-                      >
-                        Auto-Fit
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Finish Zone Alcove quick card (Shown in Races mode) */}
-                  {trackType !== 'battler' && !hideFinishZone && (
-                    <div
-                      onClick={() => {
-                        clearSelection();
-                        setIsFinishSelected(true);
-                      }}
-                      className="paper-card bg-emerald-50 hover:bg-emerald-100 p-1.5 border-2 border-emerald-800 flex items-center justify-between cursor-pointer"
-                    >
-                      <div className="flex items-center gap-1.5">
-                        <Flag className="w-3.5 h-3.5 text-emerald-700" />
-                        <span className="font-extrabold text-[11px] text-emerald-950">Finish Line Alcove</span>
-                      </div>
-                      <span className="text-[10px] font-mono text-emerald-800 font-bold">
-                        {finishZone.x},{finishZone.y} ({finishZone.w}×{finishZone.h})
-                      </span>
-                    </div>
-                  )}
-
-                  {/* Global Moving Wall Trigger Strategy Box */}
-                  <div className="paper-card bg-amber-50 p-2 border-2 border-amber-900 text-xs space-y-2">
-                    <div className="flex items-center justify-between font-black text-amber-950">
-                      <span className="flex items-center gap-1">
-                        <Flame className="w-3.5 h-3.5 text-amber-700" />
-                        Wall Trigger Condition
-                      </span>
-                    </div>
                     <div className="grid grid-cols-4 gap-1">
                       <button
                         type="button"
@@ -5412,20 +6450,20 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         Moving walls are disabled for this arena.
                       </span>
                     )}
-                  </div>
+                  </InspectorAccordion>
 
-                  <div className="text-[11px] text-slate-600 font-bold flex items-center justify-between">
-                    <span>Click any object to edit, or drag directly on map:</span>
-                  </div>
-
-                  {/* Corridors Group */}
-                  <div className="space-y-1">
-                    <div className="flex items-center justify-between text-[11px] font-black text-slate-800 uppercase">
-                      <span className="flex items-center gap-1">
-                        <Layers className="w-3 h-3" /> Rooms & Corridors ({corridors.length})
+                  {/* 4. Corridors & Rooms Accordion */}
+                  <InspectorAccordion
+                    title="Rooms & Corridors"
+                    icon={<Layers className="w-3.5 h-3.5 text-slate-700" />}
+                    badge={
+                      <span className="bg-slate-200 text-slate-900 px-1.5 py-0.5 rounded text-[9px] font-black border border-slate-400">
+                        {corridors.length}
                       </span>
-                    </div>
-                    <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
+                    }
+                    defaultOpen={true}
+                  >
+                    <div className="space-y-1 max-h-40 overflow-y-auto pr-0.5">
                       {corridors.map((c, idx) => {
                         const orderNum = c.wallOrder !== undefined ? c.wallOrder : (idx + 1);
                         return (
@@ -5457,16 +6495,20 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         );
                       })}
                     </div>
-                  </div>
+                  </InspectorAccordion>
 
-                  {/* Gates Group */}
-                  <div className="space-y-1 pt-1 border-t border-slate-200">
-                    <div className="flex items-center justify-between text-[11px] font-black text-slate-800 uppercase">
-                      <span className="flex items-center gap-1">
-                        <Shield className="w-3 h-3" /> Obstacle Gates ({gates.length})
+                  {/* 5. Obstacle Gates Accordion */}
+                  <InspectorAccordion
+                    title="Obstacle Gates"
+                    icon={<Shield className="w-3.5 h-3.5 text-purple-700" />}
+                    badge={
+                      <span className="bg-purple-100 text-purple-950 px-1.5 py-0.5 rounded text-[9px] font-black border border-purple-300">
+                        {gates.length}
                       </span>
-                    </div>
-                    <div className="space-y-1 max-h-24 overflow-y-auto pr-0.5">
+                    }
+                    defaultOpen={false}
+                  >
+                    <div className="space-y-1 max-h-32 overflow-y-auto pr-0.5">
                       {gates.map((g, idx) => {
                         const keyTeam = g.unlockTeamId ? teamList.find(t => t.id === g.unlockTeamId) : null;
                         const gateColorTeam = teamList.find(t => t.hex === g.color);
@@ -5502,17 +6544,24 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                           </div>
                         );
                       })}
+                      {gates.length === 0 && (
+                        <span className="text-[10px] text-slate-400 italic block">No obstacle gates placed.</span>
+                      )}
                     </div>
-                  </div>
+                  </InspectorAccordion>
 
-                  {/* Barriers Group */}
-                  <div className="space-y-1 pt-1 border-t border-slate-200">
-                    <div className="flex items-center justify-between text-[11px] font-black text-slate-800 uppercase">
-                      <span className="flex items-center gap-1">
-                        <Zap className="w-3 h-3 text-amber-600" /> Barriers ({barriers.length})
+                  {/* 6. Barriers Accordion */}
+                  <InspectorAccordion
+                    title="Barriers"
+                    icon={<Zap className="w-3.5 h-3.5 text-amber-600" />}
+                    badge={
+                      <span className="bg-amber-100 text-amber-950 px-1.5 py-0.5 rounded text-[9px] font-black border border-amber-300">
+                        {barriers.length}
                       </span>
-                    </div>
-                    <div className="space-y-1 max-h-24 overflow-y-auto pr-0.5">
+                    }
+                    defaultOpen={false}
+                  >
+                    <div className="space-y-1 max-h-32 overflow-y-auto pr-0.5">
                       {barriers.map((b, idx) => (
                         <div
                           key={`b_list_${idx}`}
@@ -5534,16 +6583,20 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         <span className="text-[10px] text-slate-400 italic block">No barriers placed yet.</span>
                       )}
                     </div>
-                  </div>
+                  </InspectorAccordion>
 
-                  {/* Pickups Group */}
-                  <div className="space-y-1 pt-1 border-t border-slate-200">
-                    <div className="flex items-center justify-between text-[11px] font-black text-slate-800 uppercase">
-                      <span className="flex items-center gap-1">
-                        <Package className="w-3 h-3" /> Pickups ({pickups.length})
+                  {/* 7. Pickups Accordion */}
+                  <InspectorAccordion
+                    title="Pickups & Weapons"
+                    icon={<Package className="w-3.5 h-3.5 text-rose-600" />}
+                    badge={
+                      <span className="bg-rose-100 text-rose-950 px-1.5 py-0.5 rounded text-[9px] font-black border border-rose-300">
+                        {pickups.length}
                       </span>
-                    </div>
-                    <div className="space-y-1 max-h-24 overflow-y-auto pr-0.5">
+                    }
+                    defaultOpen={false}
+                  >
+                    <div className="space-y-1 max-h-32 overflow-y-auto pr-0.5">
                       {pickups.map((p, idx) => (
                         <div
                           key={`p_list_${idx}`}
@@ -5558,15 +6611,150 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                           </span>
                         </div>
                       ))}
+                      {pickups.length === 0 && (
+                        <span className="text-[10px] text-slate-400 italic block">No pickups placed yet.</span>
+                      )}
                     </div>
-                  </div>
+                  </InspectorAccordion>
                 </div>
               )}
                 </>
               )}
 
-              {/* Restored Bottom 2-Row Horizontally Scrollable Tool Select Bar (SVG Icons Only) */}
-              <div className="mt-auto pt-2 border-t border-slate-300 flex flex-col gap-1 shrink-0">
+              {/* Bottom Dock: Compact Utility Header Row + 2-Row Horizontally Scrollable Tool Select Bar */}
+              <div className="mt-auto pt-2 border-t border-slate-300 flex flex-col gap-1.5 shrink-0">
+                {/* Compact Header Row: Restored Mode, Aspect Ratio, Zoom, Undo/Redo & Save Controls */}
+                <div className="flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-thin">
+                  {/* Track Mode Quick Switch: Races vs Battler */}
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pushSnapshot();
+                      setTrackType('races');
+                      setHideFinishZone(false);
+                    }}
+                    className={`paper-btn px-1.5 py-0.5 text-[9.5px] font-black flex items-center gap-0.5 shrink-0 cursor-pointer ${
+                      trackType === 'races'
+                        ? '!bg-emerald-300 !text-slate-950'
+                        : 'bg-white hover:bg-slate-100 text-slate-700'
+                    }`}
+                    title="Classic Race to the Finish Line"
+                  >
+                    <Flag className="w-2.5 h-2.5" />
+                    <span>Races</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      pushSnapshot();
+                      setTrackType('battler');
+                      setHideFinishZone(true);
+                    }}
+                    className={`paper-btn px-1.5 py-0.5 text-[9.5px] font-black flex items-center gap-0.5 shrink-0 cursor-pointer ${
+                      trackType === 'battler'
+                        ? '!bg-rose-400 !text-white'
+                        : 'bg-white hover:bg-slate-100 text-slate-700'
+                    }`}
+                    title="Survival Battler Mode (Health Bars, Floor Weapons, No Finish Line)"
+                  >
+                    <Swords className="w-2.5 h-2.5" />
+                    <span>Battler</span>
+                  </button>
+
+                  <div className="h-3.5 w-[1px] bg-slate-300 shrink-0 mx-0.5" />
+
+                  {/* Viewport Aspect Ratio Quick Selector (1:1, 16:9, 4:3, Full) */}
+                  {(['1:1', '16:9', '4:3', 'auto'] as ViewportAspectRatio[]).map(ratio => {
+                    const isRatioActive = (layoutConfig.aspectRatio || '4:3') === ratio;
+                    return (
+                      <button
+                        key={`btm_ratio_${ratio}`}
+                        type="button"
+                        onClick={() => {
+                          pushSnapshot();
+                          setLayoutConfig(prev => ({ ...prev, aspectRatio: ratio }));
+                        }}
+                        className={`paper-btn px-1.5 py-0.5 text-[9.5px] font-black shrink-0 cursor-pointer ${
+                          isRatioActive
+                            ? '!bg-amber-300 !text-slate-950'
+                            : 'bg-white hover:bg-slate-100 text-slate-700'
+                        }`}
+                        title={`Set Viewport Aspect Ratio to ${ratio === 'auto' ? 'Full Container' : ratio}`}
+                      >
+                        {ratio === 'auto' ? 'Full' : ratio}
+                      </button>
+                    );
+                  })}
+
+                  <div className="h-3.5 w-[1px] bg-slate-300 shrink-0 mx-0.5" />
+
+                  {/* Canvas View Zoom & Reset Controls */}
+                  <button
+                    type="button"
+                    onClick={() => setCanvasZoom(prev => Math.max(0.08, Math.round((prev - 0.15) * 100) / 100))}
+                    className="paper-btn bg-white hover:bg-slate-100 px-1.5 py-0.5 text-[9.5px] font-black flex items-center text-slate-800 shrink-0 cursor-pointer"
+                    title="Zoom Out Canvas"
+                  >
+                    <Minus className="w-2.5 h-2.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setCanvasZoom(1.0);
+                      setCanvasPan({ x: 0, y: 0 });
+                    }}
+                    className="paper-btn bg-white hover:bg-slate-100 px-1.5 py-0.5 text-[9.5px] font-black text-slate-800 shrink-0 cursor-pointer"
+                    title="Reset Zoom & Pan to 100%"
+                  >
+                    {Math.round(canvasZoom * 100)}%
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setCanvasZoom(prev => Math.min(6.0, Math.round((prev + 0.15) * 100) / 100))}
+                    className="paper-btn bg-white hover:bg-slate-100 px-1.5 py-0.5 text-[9.5px] font-black flex items-center text-slate-800 shrink-0 cursor-pointer"
+                    title="Zoom In Canvas"
+                  >
+                    <Plus className="w-2.5 h-2.5" />
+                  </button>
+
+                  <div className="h-3.5 w-[1px] bg-slate-300 shrink-0 mx-0.5" />
+
+                  {/* History Undo / Redo & Manual Save */}
+                  <button
+                    type="button"
+                    onClick={handleUndo}
+                    disabled={undoStack.length === 0}
+                    className="paper-btn bg-white hover:bg-slate-100 disabled:opacity-40 px-1.5 py-0.5 text-[9.5px] font-black flex items-center text-slate-800 shrink-0 cursor-pointer"
+                    title="Undo last change"
+                  >
+                    <Undo2 className="w-2.5 h-2.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleRedo}
+                    disabled={redoStack.length === 0}
+                    className="paper-btn bg-white hover:bg-slate-100 disabled:opacity-40 px-1.5 py-0.5 text-[9.5px] font-black flex items-center text-slate-800 shrink-0 cursor-pointer"
+                    title="Redo previous change"
+                  >
+                    <Redo2 className="w-2.5 h-2.5" />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleSaveTrack}
+                    className="paper-btn bg-amber-200 hover:bg-amber-300 px-2 py-0.5 text-[9.5px] font-black flex items-center gap-0.5 text-amber-950 shrink-0 cursor-pointer"
+                    title="Save current track and inspector settings"
+                  >
+                    <Save className="w-2.5 h-2.5" />
+                    <span>Save</span>
+                  </button>
+                  {saveToast && (
+                    <span className="bg-emerald-600 text-white text-[8.5px] font-black px-1.5 py-0.5 rounded shadow animate-fade-in flex items-center gap-0.5 shrink-0">
+                      <Check className="w-2.5 h-2.5 stroke-[3]" /> {saveToast}
+                    </span>
+                  )}
+                </div>
+
+                {/* Tool Select Label & Active Mode Indicator */}
                 <div className="flex items-center justify-between">
                   <span className="text-[10px] font-black uppercase text-slate-700 flex items-center gap-1">
                     <span>Tool Select (2 Rows)</span>

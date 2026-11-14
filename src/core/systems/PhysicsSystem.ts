@@ -10,6 +10,7 @@ import type {
   BarrierComponent,
 } from '../ecs/Component';
 import { Geometry } from '../math/Geometry';
+import { SpatialGrid } from '../math/SpatialGrid';
 import { Sound } from '../audio/SoundEngine';
 import { WEAPON_SPECS } from '../registry/PickupRegistry';
 import type { CorridorRect } from '../../types/game';
@@ -42,8 +43,19 @@ export class PhysicsSystem implements ISystem {
   name = 'PhysicsSystem';
   private sim: any;
   private racerList: RacerEntry[] = [];
+  private racerPool: RacerEntry[] = [];
   private gateList: GateEntry[] = [];
+  private gatePool: GateEntry[] = [];
   private barrierList: BarrierEntry[] = [];
+  private barrierPool: BarrierEntry[] = [];
+
+  // Uniform 2D Spatial Hash Grids (96px cells) for broadphase queries
+  private gateGrid = new SpatialGrid<GateEntry>(96);
+  private barrierGrid = new SpatialGrid<BarrierEntry>(96);
+  private racerGrid = new SpatialGrid<RacerEntry>(96);
+  private queryGatesScratch: GateEntry[] = [];
+  private queryBarriersScratch: BarrierEntry[] = [];
+  private queryRacersScratch: RacerEntry[] = [];
 
   constructor(sim: any) {
     this.sim = sim;
@@ -54,29 +66,54 @@ export class PhysicsSystem implements ISystem {
     const gateIds = world.query('Transform', 'Gate');
     const barrierIds = world.query('Transform', 'Barrier');
 
-    // Pre-fetch flat component references once per frame to avoid Map.get calls inside substep loops
+    // Pre-fetch flat component references once per frame using pooled entry objects (zero allocation)
     this.racerList.length = 0;
     for (let i = 0; i < racerIds.length; i++) {
       const id = racerIds[i];
       const state = world.getComponent(id, 'RacerState')!;
       if (!state.alive) continue;
-      this.racerList.push({
-        id,
-        pos: world.getComponent(id, 'Transform')!,
-        vel: world.getComponent(id, 'Velocity')!,
-        col: world.getComponent(id, 'Collider')!,
-        state,
-        render: world.getComponent(id, 'PaperRender')!,
-      });
+      const idx = this.racerList.length;
+      let entry = this.racerPool[idx];
+      if (!entry) {
+        entry = {
+          id,
+          pos: world.getComponent(id, 'Transform')!,
+          vel: world.getComponent(id, 'Velocity')!,
+          col: world.getComponent(id, 'Collider')!,
+          state,
+          render: world.getComponent(id, 'PaperRender')!,
+        };
+        this.racerPool[idx] = entry;
+      } else {
+        entry.id = id;
+        entry.pos = world.getComponent(id, 'Transform')!;
+        entry.vel = world.getComponent(id, 'Velocity')!;
+        entry.col = world.getComponent(id, 'Collider')!;
+        entry.state = state;
+        entry.render = world.getComponent(id, 'PaperRender')!;
+      }
+      this.racerList.push(entry);
     }
 
     this.gateList.length = 0;
+    this.gateGrid.clear();
     for (let i = 0; i < gateIds.length; i++) {
       const id = gateIds[i];
       const gate = world.getComponent(id, 'Gate');
       const pos = world.getComponent(id, 'Transform');
       if (gate && pos && gate.hp > 0) {
-        this.gateList.push({ id, pos, gate });
+        const idx = this.gateList.length;
+        let entry = this.gatePool[idx];
+        if (!entry) {
+          entry = { id, pos, gate };
+          this.gatePool[idx] = entry;
+        } else {
+          entry.id = id;
+          entry.pos = pos;
+          entry.gate = gate;
+        }
+        this.gateList.push(entry);
+        this.gateGrid.insertAABB(entry, pos.x, pos.y, gate.w, gate.h);
       }
     }
 
@@ -86,7 +123,17 @@ export class PhysicsSystem implements ISystem {
       const bar = world.getComponent(id, 'Barrier');
       const pos = world.getComponent(id, 'Transform');
       if (bar && pos) {
-        this.barrierList.push({ id, pos, bar });
+        const idx = this.barrierList.length;
+        let entry = this.barrierPool[idx];
+        if (!entry) {
+          entry = { id, pos, bar };
+          this.barrierPool[idx] = entry;
+        } else {
+          entry.id = id;
+          entry.pos = pos;
+          entry.bar = bar;
+        }
+        this.barrierList.push(entry);
       }
     }
 
@@ -109,9 +156,11 @@ export class PhysicsSystem implements ISystem {
       }
       const activeFloods: CorridorRect[] = this.sim.floodActive ? this.sim.floodRects : [];
 
-      // 0B. Advance moving barriers incrementally per substep
+      // 0B. Advance moving barriers incrementally per substep & populate barrierGrid
+      this.barrierGrid.clear();
       for (let b = 0; b < this.barrierList.length; b++) {
-        const { pos: bPos, bar } = this.barrierList[b];
+        const entry = this.barrierList[b];
+        const { pos: bPos, bar } = entry;
         if (bar.movement !== 'static') {
           bar.phase += stepDt * (bar.speed / 25);
           const offset = Math.sin(bar.phase) * bar.distance;
@@ -128,6 +177,18 @@ export class PhysicsSystem implements ISystem {
             bPos.x = bar.baseX + offset;
             bPos.y = bar.baseY + offset;
           }
+        }
+        this.barrierGrid.insertAABB(entry, bPos.x, bPos.y, bar.w, bar.h);
+      }
+
+      // Populate racerGrid for step 0 firearm auto-aim and broadphase queries
+      if (step === 0) {
+        this.racerGrid.clear();
+        for (let i = 0; i < this.racerList.length; i++) {
+          const r = this.racerList[i];
+          if (!r.state.alive) continue;
+          const half = r.col.size / 2;
+          this.racerGrid.insertAABB(r, r.pos.x - half, r.pos.y - half, r.col.size, r.col.size);
         }
       }
 
@@ -394,7 +455,7 @@ export class PhysicsSystem implements ISystem {
   }
 
   /**
-   * Swept check against all active gates when testing a proposed (testX, testY) position.
+   * Swept check against active gates using SpatialGrid broadphase when testing a proposed (testX, testY) position.
    * Applies gate damage/unlock immediately and returns true if blocked.
    */
   private checkGateSweep(
@@ -404,11 +465,13 @@ export class PhysicsSystem implements ISystem {
     half: number,
     state: RacerStateComponent
   ): boolean {
+    if (this.gateList.length === 0) return false;
     const size = half * 2;
+    const candidates = this.gateGrid.queryAABB(testX - half, testY - half, size, size, this.queryGatesScratch);
     let blocked = false;
 
-    for (let g = 0; g < this.gateList.length; g++) {
-      const entry = this.gateList[g];
+    for (let g = 0; g < candidates.length; g++) {
+      const entry = candidates[g];
       const { id: gId, pos: gPos, gate } = entry;
       if (gate.hp <= 0) continue;
 
@@ -460,12 +523,14 @@ export class PhysicsSystem implements ISystem {
   }
 
   /**
-   * Swept check against all barriers when testing a proposed (testX, testY) position.
+   * Swept check against barriers using SpatialGrid broadphase when testing a proposed (testX, testY) position.
    */
   private checkBarrierSweep(testX: number, testY: number, half: number): boolean {
+    if (this.barrierList.length === 0) return false;
     const size = half * 2;
-    for (let b = 0; b < this.barrierList.length; b++) {
-      const { pos: bPos, bar } = this.barrierList[b];
+    const candidates = this.barrierGrid.queryAABB(testX - half, testY - half, size, size, this.queryBarriersScratch);
+    for (let b = 0; b < candidates.length; b++) {
+      const { pos: bPos, bar } = candidates[b];
       if (Geometry.aabbOverlap(testX - half, testY - half, size, size, bPos.x, bPos.y, bar.w, bar.h)) {
         return true;
       }
@@ -474,7 +539,7 @@ export class PhysicsSystem implements ISystem {
   }
 
   /**
-   * Check if a box at (cx, cy) overlaps any active gate or barrier (used during pushes).
+   * Check if a box at (cx, cy) overlaps any active gate or barrier using SpatialGrid broadphase.
    */
   private boxOverlapsAnyObstacle(
     cx: number,
@@ -483,19 +548,25 @@ export class PhysicsSystem implements ISystem {
     state?: RacerStateComponent
   ): boolean {
     const size = half * 2;
-    for (let g = 0; g < this.gateList.length; g++) {
-      const { pos: gPos, gate } = this.gateList[g];
-      if (gate.hp > 0) {
-        if (state && gate.unlockTeamId && gate.unlockTeamId === state.team.id) continue;
-        if (Geometry.aabbOverlap(cx - half, cy - half, size, size, gPos.x, gPos.y, gate.w, gate.h)) {
-          return true;
+    if (this.gateList.length > 0) {
+      const gates = this.gateGrid.queryAABB(cx - half, cy - half, size, size, this.queryGatesScratch);
+      for (let g = 0; g < gates.length; g++) {
+        const { pos: gPos, gate } = gates[g];
+        if (gate.hp > 0) {
+          if (state && gate.unlockTeamId && gate.unlockTeamId === state.team.id) continue;
+          if (Geometry.aabbOverlap(cx - half, cy - half, size, size, gPos.x, gPos.y, gate.w, gate.h)) {
+            return true;
+          }
         }
       }
     }
-    for (let b = 0; b < this.barrierList.length; b++) {
-      const { pos: bPos, bar } = this.barrierList[b];
-      if (Geometry.aabbOverlap(cx - half, cy - half, size, size, bPos.x, bPos.y, bar.w, bar.h)) {
-        return true;
+    if (this.barrierList.length > 0) {
+      const barriers = this.barrierGrid.queryAABB(cx - half, cy - half, size, size, this.queryBarriersScratch);
+      for (let b = 0; b < barriers.length; b++) {
+        const { pos: bPos, bar } = barriers[b];
+        if (Geometry.aabbOverlap(cx - half, cy - half, size, size, bPos.x, bPos.y, bar.w, bar.h)) {
+          return true;
+        }
       }
     }
     return false;
@@ -522,44 +593,49 @@ export class PhysicsSystem implements ISystem {
     const minSize = minHalf * 2;
 
     // 1. Gates (only resolve if the racer's 75% core actually overlaps the gate)
-    for (let g = 0; g < this.gateList.length; g++) {
-      const { pos: gPos, gate } = this.gateList[g];
-      if (gate.hp <= 0) continue;
+    if (this.gateList.length > 0) {
+      const gates = this.gateGrid.queryAABB(pos.x - minHalf, pos.y - minHalf, minSize, minSize, this.queryGatesScratch);
+      for (let g = 0; g < gates.length; g++) {
+        const { pos: gPos, gate } = gates[g];
+        if (gate.hp <= 0) continue;
 
-      if (Geometry.aabbOverlap(pos.x - minHalf, pos.y - minHalf, minSize, minSize, gPos.x, gPos.y, gate.w, gate.h)) {
-        const isKeyholder = gate.unlockTeamId && gate.unlockTeamId === state.team.id;
-        if (isKeyholder) continue;
+        if (Geometry.aabbOverlap(pos.x - minHalf, pos.y - minHalf, minSize, minSize, gPos.x, gPos.y, gate.w, gate.h)) {
+          const isKeyholder = gate.unlockTeamId && gate.unlockTeamId === state.team.id;
+          if (isKeyholder) continue;
 
-        const survived = this.pushOutOfObstacle(
-          floodRects, pos, vel, render, half, prevX, prevY,
-          gPos.x, gPos.y, gate.w, gate.h, corridors, state
-        );
-        if (!survived) {
-          this.crushRacer(pos, state, 'SQUEEZED!');
-          return;
+          const survived = this.pushOutOfObstacle(
+            floodRects, pos, vel, render, half, prevX, prevY,
+            gPos.x, gPos.y, gate.w, gate.h, corridors, state
+          );
+          if (!survived) {
+            this.crushRacer(pos, state, 'SQUEEZED!');
+            return;
+          }
         }
       }
     }
 
     // 2. Barriers
-    for (let b = 0; b < this.barrierList.length; b++) {
-      const { pos: bPos, bar } = this.barrierList[b];
-      // For static barriers, only resolve if 75% core overlaps; for moving barriers, resolve full half
-      const checkH = bar.movement === 'static' ? minHalf : half;
-      const checkS = checkH * 2;
+    if (this.barrierList.length > 0) {
+      const barriers = this.barrierGrid.queryAABB(pos.x - half, pos.y - half, half * 2, half * 2, this.queryBarriersScratch);
+      for (let b = 0; b < barriers.length; b++) {
+        const { pos: bPos, bar } = barriers[b];
+        const checkH = bar.movement === 'static' ? minHalf : half;
+        const checkS = checkH * 2;
 
-      if (Geometry.aabbOverlap(pos.x - checkH, pos.y - checkH, checkS, checkS, bPos.x, bPos.y, bar.w, bar.h)) {
-        const survived = this.pushOutOfObstacle(
-          floodRects, pos, vel, render, half, prevX, prevY,
-          bPos.x, bPos.y, bar.w, bar.h, corridors, state
-        );
-        if (!survived) {
-          if (bar.movement !== 'static') {
-            this.crushRacer(pos, state, 'SQUEEZED!');
-            return;
+        if (Geometry.aabbOverlap(pos.x - checkH, pos.y - checkH, checkS, checkS, bPos.x, bPos.y, bar.w, bar.h)) {
+          const survived = this.pushOutOfObstacle(
+            floodRects, pos, vel, render, half, prevX, prevY,
+            bPos.x, bPos.y, bar.w, bar.h, corridors, state
+          );
+          if (!survived) {
+            if (bar.movement !== 'static') {
+              this.crushRacer(pos, state, 'SQUEEZED!');
+              return;
+            }
+          } else {
+            Sound.playBounceNote(0.9);
           }
-        } else {
-          Sound.playBounceNote(0.9);
         }
       }
     }
@@ -773,12 +849,20 @@ export class PhysicsSystem implements ISystem {
     const spec = WEAPON_SPECS[state.weapon];
     if (!spec) return;
 
-    // Find closest valid enemy within weapon range
+    // Find closest valid enemy within weapon range using SpatialGrid broadphase
     let bestTarget: RacerEntry | null = null;
-    let bestDistSq = spec.range * spec.range;
+    const range = spec.range;
+    let bestDistSq = range * range;
+    const nearbyRacers = this.racerGrid.queryAABB(
+      pos.x - range,
+      pos.y - range,
+      range * 2,
+      range * 2,
+      this.queryRacersScratch
+    );
 
-    for (let i = 0; i < this.racerList.length; i++) {
-      const cand = this.racerList[i];
+    for (let i = 0; i < nearbyRacers.length; i++) {
+      const cand = nearbyRacers[i];
       if (cand.id === shooter.id || !cand.state.alive) continue;
       if (this.sim.areRacersAllies(state, cand.state)) continue;
 
@@ -797,8 +881,10 @@ export class PhysicsSystem implements ISystem {
 
       if (state.weaponCooldown <= 0) {
         const weaponType = state.weapon;
+        const dmgMult = Math.max(0.1, state.weaponDamageMultiplier ?? 1.0);
+        const rateMult = Math.max(0.1, state.weaponFireRateMultiplier ?? 1.0);
         const shotAng = baseAng + (Math.random() - 0.5) * spec.spread;
-        const muzzleDist = shooter.col.size / 2 + spec.barrelLen;
+        const muzzleDist = shooter.col.size / 2 + 5.5 + spec.barrelLen * 1.38;
         const mx = pos.x + Math.cos(baseAng) * muzzleDist;
         const my = pos.y + Math.sin(baseAng) * muzzleDist;
 
@@ -807,7 +893,7 @@ export class PhysicsSystem implements ISystem {
           y: my,
           vx: Math.cos(shotAng) * spec.bulletSpeed,
           vy: Math.sin(shotAng) * spec.bulletSpeed,
-          damage: spec.damage,
+          damage: Math.round(spec.damage * dmgMult * 100) / 100,
           color: spec.css,
           colorHex: spec.color,
           ownerId: shooter.id,
@@ -817,14 +903,14 @@ export class PhysicsSystem implements ISystem {
         });
 
         // Eject brass shell casing sideways from gun receiver
-        const receiverX = pos.x + Math.cos(baseAng) * (shooter.col.size / 2 + 4);
-        const receiverY = pos.y + Math.sin(baseAng) * (shooter.col.size / 2 + 4);
+        const receiverX = pos.x + Math.cos(baseAng) * (shooter.col.size / 2 + 6);
+        const receiverY = pos.y + Math.sin(baseAng) * (shooter.col.size / 2 + 6);
         this.sim.spawnShellCasing(receiverX, receiverY, baseAng);
 
         // Trigger muzzle flash, recoil kickback, weapon-specific SFX, and subtle camera punch
         state.muzzleFlashTimer = 0.065;
         state.recoilTimer = 0.085;
-        state.weaponCooldown = spec.cooldown;
+        state.weaponCooldown = Math.max(0.03, spec.cooldown / rateMult);
         state.weaponAmmo = Math.max(0, state.weaponAmmo - 1);
 
         Sound.play(`gun_${weaponType}`);
@@ -834,6 +920,8 @@ export class PhysicsSystem implements ISystem {
           state.weapon = null;
           state.weaponAmmo = 0;
           state.weaponMaxAmmo = 0;
+          state.weaponDamageMultiplier = 1.0;
+          state.weaponFireRateMultiplier = 1.0;
           state.muzzleFlashTimer = 0;
           state.recoilTimer = 0;
           Sound.play('ammo_empty');
@@ -876,12 +964,14 @@ export class PhysicsSystem implements ISystem {
     attPos: TransformComponent,
     vicPos: TransformComponent
   ): void {
+    const dmgMult = Math.max(0.1, attState.weaponDamageMultiplier ?? 1.0);
     attState.weapon = null;
+    attState.weaponDamageMultiplier = 1.0;
     const dropX = (attPos.x + vicPos.x) * 0.5;
     const dropY = (attPos.y + vicPos.y) * 0.5;
 
-    this.sim.damageRacer(vicId, vicPos, vicState, 55, 'knife', attState);
-    this.sim.spawnPickup('knife', dropX, dropY, 0.45);
+    this.sim.damageRacer(vicId, vicPos, vicState, Math.round(55 * dmgMult), 'knife', attState);
+    this.sim.spawnPickup('knife', dropX, dropY, 0.45, { damageMultiplier: dmgMult });
   }
 
   private triggerBounce(render: PaperRenderComponent, hitX: boolean, hitY: boolean, audioIntensity = 1.0): void {

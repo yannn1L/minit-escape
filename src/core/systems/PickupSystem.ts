@@ -27,6 +27,13 @@ export class PickupSystem implements ISystem {
         continue;
       }
 
+      // Destroy floor pickup immediately if an advancing moving wall covers it
+      if (this.sim.floodActive && this.sim.isPointInFlood(pPos.x, pPos.y)) {
+        this.sim.spawnConfetti(pPos.x, pPos.y, 0x06f9f9, 5);
+        world.destroyEntity(pId);
+        continue;
+      }
+
       pickup.bobPhase += dt * 5;
 
       for (let r = 0; r < racers.length; r++) {

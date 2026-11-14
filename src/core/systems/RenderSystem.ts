@@ -1,7 +1,12 @@
 import type { ISystem } from '../ecs/System';
 import type { World } from '../ecs/World';
 import { GlobalRegistry } from '../registry/StrategyRegistry';
-import { drawFirearmShape, type PickupStrategy } from '../registry/PickupRegistry';
+import {
+  drawFirearmShape,
+  drawKnifeShape,
+  WEAPON_SPECS,
+  type PickupStrategy,
+} from '../registry/PickupRegistry';
 
 export class RenderSystem implements ISystem {
   name = 'RenderSystem';
@@ -13,6 +18,12 @@ export class RenderSystem implements ISystem {
   private visMinY = 0;
   private visMaxX = 500;
   private visMaxY = 800;
+
+  // Offscreen static track cache (eliminates 4-pass corridor redraws every frame)
+  private trackCacheCanvas: HTMLCanvasElement | null = null;
+  private trackCacheCtx: CanvasRenderingContext2D | null = null;
+  private trackCacheBounds = { x: 0, y: 0, w: 0, h: 0, scale: 2 };
+  private cachedMapSignature = '';
 
   constructor(sim: any) {
     this.sim = sim;
@@ -40,15 +51,28 @@ export class RenderSystem implements ISystem {
     return x + w >= this.visMinX && x <= this.visMaxX && y + h >= this.visMinY && y <= this.visMaxY;
   }
 
-  private renderTrackGeometry(ctx: CanvasRenderingContext2D): void {
+  private computeMapGeometrySignature(): string {
+    const map = this.sim.currentMap;
+    if (!map) return '';
+    const corridors = map.corridors || [];
+    const fz = map.finishZone || { x: 0, y: 0, w: 0, h: 0, rotation: 0 };
+    let sig = `${map.id}:${map.trackType || 'races'}:${map.hideFinishZone ? 1 : 0}:${fz.x},${fz.y},${fz.w},${fz.h},${fz.rotation || 0}|`;
+    for (let i = 0; i < corridors.length; i++) {
+      const c = corridors[i];
+      sig += `${c.x},${c.y},${c.w},${c.h},${c.shape || 'rect'};`;
+    }
+    return sig;
+  }
+
+  private drawTrackPassToContext(ctx: CanvasRenderingContext2D, cullFrustum: boolean): void {
     const corridors = this.sim.currentMap.corridors;
     const len = corridors.length;
 
-    // 1. Outer Dark Drop Shadow (frustum-culled, supports rect & circle rooms)
+    // 1. Outer Dark Drop Shadow (supports rect & circle rooms)
     ctx.fillStyle = 'rgba(15, 23, 42, 0.35)';
     for (let i = 0; i < len; i++) {
       const c = corridors[i];
-      if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
+      if (cullFrustum && !this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
       if (c.shape === 'circle') {
         ctx.beginPath();
         ctx.ellipse(c.x + c.w / 2 + 5, c.y + c.h / 2 + 6, Math.max(4, c.w / 2), Math.max(4, c.h / 2), 0, 0, Math.PI * 2);
@@ -62,7 +86,7 @@ export class RenderSystem implements ISystem {
     ctx.fillStyle = '#0f172a';
     for (let i = 0; i < len; i++) {
       const c = corridors[i];
-      if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
+      if (cullFrustum && !this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
       if (c.shape === 'circle') {
         ctx.beginPath();
         ctx.ellipse(c.x + c.w / 2, c.y + c.h / 2, Math.max(4, c.w / 2 + 3), Math.max(4, c.h / 2 + 3), 0, 0, Math.PI * 2);
@@ -76,7 +100,7 @@ export class RenderSystem implements ISystem {
     ctx.fillStyle = '#cbd5e1';
     for (let i = 0; i < len; i++) {
       const c = corridors[i];
-      if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
+      if (cullFrustum && !this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
       if (c.shape === 'circle') {
         ctx.beginPath();
         ctx.ellipse(c.x + c.w / 2, c.y + c.h / 2, Math.max(4, c.w / 2), Math.max(4, c.h / 2), 0, 0, Math.PI * 2);
@@ -90,7 +114,7 @@ export class RenderSystem implements ISystem {
     ctx.fillStyle = '#f8fafc';
     for (let i = 0; i < len; i++) {
       const c = corridors[i];
-      if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
+      if (cullFrustum && !this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
       if (c.shape === 'circle') {
         ctx.beginPath();
         ctx.ellipse(c.x + c.w / 2 + 1.5, c.y + c.h / 2 + 1.5, Math.max(4, c.w / 2 - 1.5), Math.max(4, c.h / 2 - 1.5), 0, 0, Math.PI * 2);
@@ -106,7 +130,7 @@ export class RenderSystem implements ISystem {
     }
     const fz = this.sim.currentMap.finishZone;
     const padFz = Math.max(fz.w, fz.h);
-    if (!this.isRectVisible(fz.x - padFz, fz.y - padFz, fz.w + padFz * 2, fz.h + padFz * 2)) {
+    if (cullFrustum && !this.isRectVisible(fz.x - padFz, fz.y - padFz, fz.w + padFz * 2, fz.h + padFz * 2)) {
       return;
     }
 
@@ -143,6 +167,76 @@ export class RenderSystem implements ISystem {
       }
     }
     ctx.restore();
+  }
+
+  private ensureTrackCache(): boolean {
+    if (typeof document === 'undefined') return false;
+    const corridors = this.sim.currentMap?.corridors;
+    if (!corridors || corridors.length === 0) return false;
+
+    const sig = this.computeMapGeometrySignature();
+    if (!this.sim.trackCacheDirty && sig === this.cachedMapSignature && this.trackCacheCanvas && this.trackCacheBounds.w > 0) {
+      return true;
+    }
+
+    let minX = Infinity;
+    let minY = Infinity;
+    let maxX = -Infinity;
+    let maxY = -Infinity;
+
+    for (let i = 0; i < corridors.length; i++) {
+      const c = corridors[i];
+      if (c.x - 16 < minX) minX = c.x - 16;
+      if (c.y - 16 < minY) minY = c.y - 16;
+      if (c.x + c.w + 24 > maxX) maxX = c.x + c.w + 24;
+      if (c.y + c.h + 24 > maxY) maxY = c.y + c.h + 24;
+    }
+
+    if (!this.sim.currentMap.hideFinishZone && (this.sim.currentMap.trackType || 'races') !== 'battler') {
+      const fz = this.sim.currentMap.finishZone;
+      const pad = Math.max(fz.w, fz.h) + 12;
+      if (fz.x - pad < minX) minX = fz.x - pad;
+      if (fz.y - pad < minY) minY = fz.y - pad;
+      if (fz.x + fz.w + pad > maxX) maxX = fz.x + fz.w + pad;
+      if (fz.y + fz.h + pad > maxY) maxY = fz.y + fz.h + pad;
+    }
+
+    const worldW = Math.ceil(maxX - minX);
+    const worldH = Math.ceil(maxY - minY);
+    if (worldW <= 0 || worldH <= 0 || worldW > 4096 || worldH > 4096) {
+      return false;
+    }
+
+    const scale = worldW * 2 <= 4096 && worldH * 2 <= 4096 ? 2 : 1;
+    if (!this.trackCacheCanvas) {
+      this.trackCacheCanvas = document.createElement('canvas');
+      this.trackCacheCtx = this.trackCacheCanvas.getContext('2d');
+    }
+    if (!this.trackCacheCtx) return false;
+
+    this.trackCacheCanvas.width = worldW * scale;
+    this.trackCacheCanvas.height = worldH * scale;
+    this.trackCacheBounds = { x: Math.floor(minX), y: Math.floor(minY), w: worldW, h: worldH, scale };
+
+    const cCtx = this.trackCacheCtx;
+    cCtx.setTransform(scale, 0, 0, scale, -this.trackCacheBounds.x * scale, -this.trackCacheBounds.y * scale);
+    cCtx.clearRect(this.trackCacheBounds.x, this.trackCacheBounds.y, worldW, worldH);
+    this.drawTrackPassToContext(cCtx, false);
+
+    this.sim.trackCacheDirty = false;
+    this.cachedMapSignature = sig;
+    return true;
+  }
+
+  private renderTrackGeometry(ctx: CanvasRenderingContext2D): void {
+    if (this.ensureTrackCache() && this.trackCacheCanvas) {
+      const b = this.trackCacheBounds;
+      if (this.isRectVisible(b.x, b.y, b.w, b.h)) {
+        ctx.drawImage(this.trackCacheCanvas, b.x, b.y, b.w, b.h);
+      }
+      return;
+    }
+    this.drawTrackPassToContext(ctx, true);
   }
 
   update(world: World, dt: number): void {
@@ -418,9 +512,12 @@ export class RenderSystem implements ISystem {
       const pickup = world.getComponent(id, 'Pickup')!;
 
       if (pickup.spawnDelay > 0) continue;
-      if (!this.isRectVisible(pos.x - 16, pos.y - 16, 32, 32)) continue;
+      if (!this.isRectVisible(pos.x - 24, pos.y - 26, 48, 48)) continue;
 
       const bobY = pos.y + Math.sin(pickup.bobPhase) * 2.5;
+      const gunSpec = (WEAPON_SPECS as Record<string, (typeof WEAPON_SPECS)['uzi'] | undefined>)[
+        pickup.strategyKey
+      ];
 
       ctx.save();
       ctx.translate(pos.x, bobY);
@@ -428,7 +525,7 @@ export class RenderSystem implements ISystem {
       // Paper sticker drop shadow
       ctx.fillStyle = 'rgba(15, 23, 42, 0.25)';
       ctx.beginPath();
-      ctx.arc(1.5, 2.5, 12, 0, Math.PI * 2);
+      ctx.arc(1.5, 2.5, 12.5, 0, Math.PI * 2);
       ctx.fill();
 
       // White paper backing circle
@@ -436,13 +533,42 @@ export class RenderSystem implements ISystem {
       ctx.strokeStyle = '#0f172a';
       ctx.lineWidth = 2.5;
       ctx.beginPath();
-      ctx.arc(0, 0, 12, 0, Math.PI * 2);
+      ctx.arc(0, 0, 12.5, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
+
+      // Subtle colored inner ring for firearms
+      if (gunSpec) {
+        ctx.strokeStyle = gunSpec.css;
+        ctx.lineWidth = 1.4;
+        ctx.beginPath();
+        ctx.arc(0, 0, 10, 0, Math.PI * 2);
+        ctx.stroke();
+      }
 
       const strategy = GlobalRegistry.get<PickupStrategy>('pickup', pickup.strategyKey);
       if (strategy) {
         strategy.drawIcon(ctx, 12);
+      }
+
+      // Gun Name Text at the Top of Firearm Pickup Items
+      if (gunSpec) {
+        const dmgMult = pickup.damageMultiplier ?? 1;
+        const ammoMult = pickup.ammoMultiplier ?? 1;
+        let topName = gunSpec.displayName;
+        if (dmgMult !== 1) {
+          topName += ` x${dmgMult}`;
+        } else if (ammoMult !== 1) {
+          topName += ` +AMMO`;
+        }
+        ctx.font = '900 8.5px Fredoka, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.lineWidth = 3.2;
+        ctx.strokeStyle = '#0f172a';
+        ctx.fillStyle = '#ffffff';
+        ctx.strokeText(topName, 0, -17.5);
+        ctx.fillText(topName, 0, -17.5);
       }
 
       ctx.restore();
@@ -613,29 +739,16 @@ export class RenderSystem implements ISystem {
       // 6. Equipped Rotating Knife or Firearm (Uzi, UMP, AK, Mini 14, SCAR)
       if (st.alive && st.weapon === 'knife') {
         const angle = Math.atan2(vel.vy, vel.vx);
-        const kx = Math.cos(angle) * (half + 6);
-        const ky = Math.sin(angle) * (half + 6);
+        const kx = Math.cos(angle) * (half + 6.5);
+        const ky = Math.sin(angle) * (half + 6.5);
 
         ctx.save();
         ctx.translate(kx, ky);
         ctx.rotate(angle);
-
-        ctx.fillStyle = '#f8fafc';
-        ctx.strokeStyle = '#0f172a';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.moveTo(0, -4.5);
-        ctx.lineTo(14, 0);
-        ctx.lineTo(0, 4.5);
-        ctx.closePath();
-        ctx.fill();
-        ctx.stroke();
-
-        ctx.fillStyle = '#1e293b';
-        ctx.beginPath();
-        ctx.arc(-3, 0, 3.2, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.stroke();
+        if (Math.cos(angle) < 0) {
+          ctx.scale(1, -1);
+        }
+        drawKnifeShape(ctx, 1.15);
         ctx.restore();
       } else if (
         st.alive &&
@@ -647,10 +760,11 @@ export class RenderSystem implements ISystem {
           st.weapon === 'scar')
       ) {
         const angle = st.aimAngle ?? Math.atan2(vel.vy, vel.vx);
-        const recoilKick = st.recoilTimer > 0 ? -3.6 * (st.recoilTimer / 0.085) : 0;
-        const dist = half + 4 + recoilKick;
+        const recoilKick = st.recoilTimer > 0 ? -4.2 * (st.recoilTimer / 0.085) : 0;
+        const dist = half + 5.5 + recoilKick;
         const gx = Math.cos(angle) * dist;
         const gy = Math.sin(angle) * dist;
+        const equipScale = 1.38; // +50% larger equipped gun model (0.92 * 1.5 = 1.38)
 
         ctx.save();
         ctx.translate(gx, gy);
@@ -658,13 +772,14 @@ export class RenderSystem implements ISystem {
         if (Math.cos(angle) < 0) {
           ctx.scale(1, -1);
         }
-        drawFirearmShape(ctx, st.weapon, 0.92);
+        drawFirearmShape(ctx, st.weapon, equipScale);
 
         // Crisp 2.5D Paper-Cut Muzzle Flash Burst at Barrel Tip
         if (st.muzzleFlashTimer > 0) {
-          const tipX = st.weapon === 'mini14' ? 13 : st.weapon === 'ak' ? 13.5 : 10.5;
-          const tipY = -1.2;
-          const flashScale = 0.75 + (st.muzzleFlashTimer / 0.065) * 0.55;
+          const spec = WEAPON_SPECS[st.weapon];
+          const tipX = (spec ? spec.barrelLen : 12) * equipScale;
+          const tipY = -1.2 * equipScale;
+          const flashScale = (0.75 + (st.muzzleFlashTimer / 0.065) * 0.55) * 1.25;
 
           ctx.save();
           ctx.translate(tipX, tipY);
