@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import type { TeamConfig } from '../../types/game';
-import { X, Check } from 'lucide-react';
+import { X, Check, Users } from 'lucide-react';
 
 interface RacerStudioModalProps {
   isOpen: boolean;
@@ -36,8 +36,9 @@ export const RacerStudioModal: React.FC<RacerStudioModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b-2 border-slate-900">
           <div className="flex items-center gap-2">
+            <Users className="w-5 h-5 text-rose-700" />
             <span className="text-base sm:text-lg font-black text-slate-900">
-              🎨 Custom Racer Studio & Team Roster
+              Custom Racer Studio & Team Roster
             </span>
           </div>
           <button

@@ -15,9 +15,16 @@ import type {
   TeamLiveStats,
   CorridorRect,
   CameraConfig,
-  SimulationLayoutConfig
+  SimulationLayoutConfig,
+  WeaponType,
 } from '../types/game';
-import { DEFAULT_TEAMS, DEFAULT_CAMERA_CONFIG, DEFAULT_LAYOUT_CONFIG } from '../types/game';
+import {
+  DEFAULT_TEAMS,
+  DEFAULT_CAMERA_CONFIG,
+  DEFAULT_LAYOUT_CONFIG,
+  DEFAULT_BATTLER_CONFIG,
+} from '../types/game';
+import type { RacerStateComponent, TransformComponent } from '../core/ecs/Component';
 
 export interface Splatter {
   x: number;
@@ -44,6 +51,36 @@ export interface FloatingText {
   color: string;
   life: number;
 }
+
+export interface Projectile {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  damage: number;
+  color: string;
+  colorHex: number;
+  ownerId: number;
+  ownerTeamId: string;
+  battleAlliance?: 'A' | 'B' | 'boss';
+  life: number;
+}
+
+const FLOOR_WEAPON_POOL: string[] = [
+  'uzi',
+  'ump',
+  'ak',
+  'mini14',
+  'scar',
+  'uzi',
+  'ump',
+  'ak',
+  'mini14',
+  'scar',
+  'shield',
+  'knife',
+  'star_dash',
+];
 
 export class RaceSimulation {
   public world = new World();
@@ -86,6 +123,8 @@ export class RaceSimulation {
   public dirtySplatters: Splatter[] = [];
   public particles: Particle[] = [];
   public floatingTexts: FloatingText[] = [];
+  public projectiles: Projectile[] = [];
+  public randomWeaponTimer = 2.0;
   public trackCacheDirty = true;
 
   public allEliminatedDeclared = false;
@@ -317,8 +356,10 @@ export class RaceSimulation {
     this.dirtySplatters.length = 0;
     this.particles.length = 0;
     this.floatingTexts.length = 0;
+    this.projectiles.length = 0;
     this.floodRects.length = 0;
     this.floodDist = 0;
+    this.randomWeaponTimer = 2.0;
     this.winnerDeclared = false;
     this.winningTeam = null;
     this.allEliminatedDeclared = false;
@@ -485,7 +526,28 @@ export class RaceSimulation {
 
   spawnRacer(team: TeamConfig, x: number, y: number, vx: number, vy: number): number {
     const id = this.world.createEntity();
-    const size = 20;
+    const isBattler = (this.currentMap.trackType || 'races') === 'battler';
+    const bCfg = this.currentMap.battlerConfig || DEFAULT_BATTLER_CONFIG;
+    const subMode = isBattler ? (bCfg.subMode || 'ffa') : 'ffa';
+
+    let baseHp = Math.max(10, bCfg.defaultHp || team.maxHp || 100);
+    let size = 20;
+    let battleAlliance: 'A' | 'B' | 'boss' | undefined = undefined;
+
+    if (isBattler) {
+      if (subMode === 'boss_fight') {
+        const isBoss = team.id === (bCfg.bossTeamId || 'red');
+        if (isBoss) {
+          baseHp = Math.round(baseHp * Math.max(1.5, bCfg.bossHpMultiplier || 4));
+          size = 28;
+          battleAlliance = 'boss';
+        } else {
+          battleAlliance = 'A';
+        }
+      } else if (subMode === 'team_battle') {
+        battleAlliance = team.battleAlliance || 'A';
+      }
+    }
 
     this.world.addComponent(id, 'Transform', { x, y });
     this.world.addComponent(id, 'Velocity', { vx: vx * 60, vy: vy * 60 });
@@ -493,12 +555,22 @@ export class RaceSimulation {
     this.world.addComponent(id, 'RacerState', {
       team,
       alive: true,
+      hp: baseHp,
+      maxHp: baseHp,
       progress: 0,
       weapon: null,
       weaponCooldown: 0,
+      weaponAmmo: 0,
+      weaponMaxAmmo: 0,
+      muzzleFlashTimer: 0,
+      recoilTimer: 0,
+      aimAngle: Math.atan2(vy, vx),
+      hitFlashTimer: 0,
+      kills: 0,
+      battleAlliance,
       shield: false,
       speedBoostTimer: 0,
-      invulnTimer: 0.2,
+      invulnTimer: 0.25,
       petrifiedBy: null,
     });
     this.world.addComponent(id, 'PaperRender', {
@@ -508,6 +580,153 @@ export class RaceSimulation {
     });
 
     return id;
+  }
+
+  areRacersAllies(stA: RacerStateComponent, stB: RacerStateComponent): boolean {
+    if (stA.team.id === stB.team.id) return true;
+    if ((this.currentMap.trackType || 'races') === 'battler') {
+      const subMode = this.currentMap.battlerConfig?.subMode || 'ffa';
+      if (subMode === 'team_battle' || subMode === 'boss_fight') {
+        if (stA.battleAlliance && stB.battleAlliance && stA.battleAlliance === stB.battleAlliance) {
+          return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  damageRacer(
+    _vicId: number,
+    vicPos: TransformComponent,
+    vicState: RacerStateComponent,
+    damage: number,
+    cause: 'knife' | 'gun' | 'flood',
+    attackerState?: RacerStateComponent
+  ): void {
+    if (!vicState.alive || vicState.invulnTimer > 0) return;
+
+    if (vicState.shield) {
+      vicState.shield = false;
+      vicState.invulnTimer = 0.45;
+      Sound.play('gate_break');
+      this.spawnFloatingText(vicPos.x, vicPos.y - 12, 'SHIELD BLOCK!', 0x38bdf8);
+      this.spawnConfetti(vicPos.x, vicPos.y, 0x38bdf8, 10);
+      return;
+    }
+
+    vicState.hp = Math.max(0, Math.round((vicState.hp - damage) * 100) / 100);
+    vicState.hitFlashTimer = 0.16;
+    vicState.invulnTimer = cause === 'knife' ? 0.35 : 0.05;
+
+    if (vicState.hp <= 0) {
+      vicState.alive = false;
+      vicState.petrifiedBy = cause;
+      if (attackerState) {
+        attackerState.kills = (attackerState.kills || 0) + 1;
+      }
+      Sound.play('knife_kill');
+      this.spawnInkSplatter(vicPos.x, vicPos.y, vicState.team.hex);
+      this.spawnConfetti(vicPos.x, vicPos.y, vicState.team.hex, 18);
+      this.spawnFloatingText(
+        vicPos.x,
+        vicPos.y - 14,
+        cause === 'knife' ? 'SLICED!' : 'KO!',
+        vicState.team.hex
+      );
+      this.triggerHitStop(0.035);
+      this.addScreenShake(6.0);
+    } else {
+      if (cause === 'gun') {
+        Sound.play('bullet_hit');
+        this.spawnConfetti(vicPos.x, vicPos.y, 0xfef08a, 5);
+      }
+      this.spawnConfetti(vicPos.x, vicPos.y, vicState.team.hex, 4);
+      const dmgLabel = Number.isInteger(damage) ? `${damage}` : damage.toFixed(1);
+      this.spawnFloatingText(vicPos.x, vicPos.y - 14, `-${dmgLabel} HP`, 0xef4444);
+    }
+
+    this.notifyStatsChanged(true);
+  }
+
+  spawnShellCasing(x: number, y: number, aimAngle: number): void {
+    if (this.particles.length >= 120) return;
+    const ejectSide = aimAngle - Math.PI / 2 + (Math.random() - 0.5) * 0.45;
+    const spd = 45 + Math.random() * 55;
+    this.particles.push({
+      x,
+      y,
+      vx: Math.cos(ejectSide) * spd,
+      vy: Math.sin(ejectSide) * spd - 25,
+      size: 3.2,
+      color: '#facc15',
+      life: 0.34,
+    });
+  }
+
+  spawnProjectile(proj: Projectile): void {
+    if (this.projectiles.length > 80) this.projectiles.shift();
+    this.projectiles.push(proj);
+  }
+
+  private updateProjectiles(dt: number): void {
+    if (this.projectiles.length === 0) return;
+    const racers = this.world.query('Transform', 'RacerState', 'Collider');
+    const corridors = this.currentMap.corridors;
+
+    for (let i = this.projectiles.length - 1; i >= 0; i--) {
+      const p = this.projectiles[i];
+      p.life -= dt;
+      if (p.life <= 0) {
+        this.projectiles[i] = this.projectiles[this.projectiles.length - 1];
+        this.projectiles.pop();
+        continue;
+      }
+
+      p.x += p.vx * dt;
+      p.y += p.vy * dt;
+
+      // Destroy bullet if it leaves walkable rooms
+      if (!Geometry.isPointInCorridors(p.x, p.y, corridors)) {
+        this.spawnConfetti(p.x, p.y, p.colorHex, 2);
+        this.projectiles[i] = this.projectiles[this.projectiles.length - 1];
+        this.projectiles.pop();
+        continue;
+      }
+
+      let hitTarget = false;
+      for (let r = 0; r < racers.length; r++) {
+        const rId = racers[r];
+        if (rId === p.ownerId) continue;
+        const st = this.world.getComponent(rId, 'RacerState')!;
+        if (!st.alive) continue;
+        if (st.team.id === p.ownerTeamId) continue;
+        if (
+          (this.currentMap.trackType || 'races') === 'battler' &&
+          p.battleAlliance &&
+          st.battleAlliance &&
+          p.battleAlliance === st.battleAlliance
+        ) {
+          continue;
+        }
+
+        const rPos = this.world.getComponent(rId, 'Transform')!;
+        const rCol = this.world.getComponent(rId, 'Collider')!;
+        const hitRadius = rCol.size * 0.58;
+        const dx = p.x - rPos.x;
+        const dy = p.y - rPos.y;
+        if (dx * dx + dy * dy <= hitRadius * hitRadius) {
+          const attState = this.world.getComponent(p.ownerId, 'RacerState');
+          this.damageRacer(rId, rPos, st, p.damage, 'gun', attState);
+          hitTarget = true;
+          break;
+        }
+      }
+
+      if (hitTarget) {
+        this.projectiles[i] = this.projectiles[this.projectiles.length - 1];
+        this.projectiles.pop();
+      }
+    }
   }
 
   spawnGate(gDef: any): number {
@@ -731,26 +950,70 @@ export class RaceSimulation {
     const activeTeams = this.teams.filter(t => t.enabled !== false);
     const targetTeams = activeTeams.length > 0 ? activeTeams : this.teams.slice(0, 2);
 
+    const isBattler = (this.currentMap.trackType || 'races') === 'battler';
+    const bCfg = this.currentMap.battlerConfig || DEFAULT_BATTLER_CONFIG;
+    const defaultMaxHp = Math.max(10, bCfg.defaultHp || 100);
+
     const stats: TeamLiveStats[] = targetTeams.map(team => {
       let maxProgress = 0;
       let anyAlive = false;
       let aliveCount = 0;
+      let totalHp = 0;
+      let maxHp = team.maxHp || defaultMaxHp;
+      let activeWeapon: WeaponType | null = null;
+      let activeWeaponAmmo = 0;
+      let activeWeaponMaxAmmo = 0;
+      let totalKills = 0;
+      let battleAlliance: 'A' | 'B' | 'boss' | undefined =
+        isBattler && bCfg.subMode === 'boss_fight'
+          ? team.id === (bCfg.bossTeamId || 'red')
+            ? 'boss'
+            : 'A'
+          : isBattler && bCfg.subMode === 'team_battle'
+          ? team.battleAlliance || 'A'
+          : undefined;
 
       for (let i = 0; i < racers.length; i++) {
         const id = racers[i];
         const st = this.world.getComponent(id, 'RacerState')!;
         if (st.team.id === team.id) {
           if (st.progress > maxProgress) maxProgress = st.progress;
+          maxHp = Math.max(maxHp, st.maxHp || defaultMaxHp);
+          totalKills += st.kills || 0;
+          if (st.battleAlliance) battleAlliance = st.battleAlliance;
           if (st.alive) {
             anyAlive = true;
             aliveCount++;
+            if (st.hp > totalHp) totalHp = st.hp;
+            if (st.weapon) {
+              activeWeapon = st.weapon;
+              activeWeaponAmmo = st.weaponAmmo || 0;
+              activeWeaponMaxAmmo = st.weaponMaxAmmo || st.weaponAmmo || 0;
+            }
           }
         }
       }
-      return { team, maxProgress, anyAlive, aliveCount };
+      return {
+        team,
+        maxProgress,
+        anyAlive,
+        aliveCount,
+        hp: anyAlive ? totalHp : 0,
+        maxHp,
+        weapon: activeWeapon,
+        weaponAmmo: activeWeaponAmmo,
+        weaponMaxAmmo: activeWeaponMaxAmmo,
+        kills: totalKills,
+        battleAlliance,
+      };
     });
 
     stats.sort((a, b) => {
+      if (isBattler) {
+        if (a.anyAlive !== b.anyAlive) return a.anyAlive ? -1 : 1;
+        if (b.hp !== a.hp) return b.hp - a.hp;
+        return (b.kills || 0) - (a.kills || 0);
+      }
       if (b.maxProgress !== a.maxProgress) return b.maxProgress - a.maxProgress;
       if (a.anyAlive !== b.anyAlive) return a.anyAlive ? -1 : 1;
       return 0;
@@ -759,7 +1022,7 @@ export class RaceSimulation {
     let sig = '';
     for (let i = 0; i < stats.length; i++) {
       const s = stats[i];
-      sig += `${s.team.id}:${s.maxProgress}:${s.aliveCount}|`;
+      sig += `${s.team.id}:${s.maxProgress}:${s.aliveCount}:${s.hp}:${s.weapon || ''}:${s.weaponAmmo || 0}:${s.kills || 0}|`;
     }
     if (!force && sig === this.lastStatsSignature) return;
     this.lastStatsSignature = sig;
@@ -788,20 +1051,46 @@ export class RaceSimulation {
       }
     }
 
-    this.world.update(dt);
+    // Random floor weapon spawner (active in Battler mode or when randomWeaponSpawn is enabled)
+    const isBattler = (this.currentMap.trackType || 'races') === 'battler';
+    const bCfg = this.currentMap.battlerConfig || DEFAULT_BATTLER_CONFIG;
+    if (!this.winnerDeclared && !this.allEliminatedDeclared && (isBattler ? bCfg.randomWeaponSpawn !== false : !!bCfg.randomWeaponSpawn)) {
+      this.randomWeaponTimer -= dt;
+      if (this.randomWeaponTimer <= 0) {
+        this.randomWeaponTimer = Math.max(1.0, bCfg.weaponSpawnInterval || 3.5);
+        const activePickups = this.world.query('Pickup');
+        const maxFloor = Math.max(1, bCfg.maxFloorWeapons || 6);
+        if (activePickups.length < maxFloor && this.currentMap.corridors.length > 0) {
+          const pt = Geometry.randomPointInCorridors(this.currentMap.corridors, 24);
+          const randomKey = FLOOR_WEAPON_POOL[Math.floor(Math.random() * FLOOR_WEAPON_POOL.length)];
+          this.spawnPickup(randomKey, pt.x, pt.y, 0);
+          this.spawnConfetti(pt.x, pt.y, 0xfacc15, 5);
+        }
+      }
+    }
 
-    // Check if all racers are eliminated and race has not completed
+    this.world.update(dt);
+    this.updateProjectiles(dt);
+
+    // Check Battler Survivor Victory OR All-Eliminated Game Over
     if (!this.winnerDeclared && !this.allEliminatedDeclared) {
       const racers = this.world.query('RacerState');
       if (racers.length > 0) {
         let anyAlive = false;
+        const aliveTeams = new Map<string, TeamConfig>();
+        const aliveAlliances = new Set<string>();
+
         for (let i = 0; i < racers.length; i++) {
           const st = this.world.getComponent(racers[i], 'RacerState')!;
           if (st.alive) {
             anyAlive = true;
-            break;
+            aliveTeams.set(st.team.id, st.team);
+            if (st.battleAlliance) {
+              aliveAlliances.add(st.battleAlliance);
+            }
           }
         }
+
         if (!anyAlive) {
           this.allEliminatedDeclared = true;
           Sound.play('game_over');
@@ -809,6 +1098,17 @@ export class RaceSimulation {
           this.spawnFloatingText(250, 380, 'ALL RACERS ELIMINATED!', 0xef4444);
           if (this.onAllEliminated) {
             this.onAllEliminated();
+          }
+        } else if (isBattler && racers.length > 1) {
+          const subMode = bCfg.subMode || 'ffa';
+          if (subMode === 'ffa' && aliveTeams.size === 1) {
+            const lastSurvivor = Array.from(aliveTeams.values())[0];
+            this.declareWinner(lastSurvivor);
+          } else if ((subMode === 'team_battle' || subMode === 'boss_fight') && aliveAlliances.size === 1) {
+            const survivingLeader = Array.from(aliveTeams.values())[0];
+            if (survivingLeader) {
+              this.declareWinner(survivingLeader);
+            }
           }
         }
       }

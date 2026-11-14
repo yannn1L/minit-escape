@@ -13,20 +13,32 @@ import type {
   CameraType,
   BaySpawn,
   SimulationLayoutConfig,
-  ViewportAspectRatio
+  ViewportAspectRatio,
+  TrackType,
+  BattlerConfig,
+  BattlerSubMode,
 } from '../../types/game';
-import { DEFAULT_CAMERA_CONFIG, DEFAULT_LAYOUT_CONFIG } from '../../types/game';
+import {
+  DEFAULT_CAMERA_CONFIG,
+  DEFAULT_LAYOUT_CONFIG,
+  DEFAULT_BATTLER_CONFIG,
+} from '../../types/game';
 import {
   MAP_CLASSIC_SERPENTINE,
   MAP_DOUBLE_HELIX,
-  MAP_ARENA_GAUNTLET
+  MAP_ARENA_GAUNTLET,
+  MAP_BATTLEGROUND,
+  createEmptyCircuit,
 } from '../../core/registry/MapRegistry';
 import { Sound } from '../../core/audio/SoundEngine';
 import {
   Play, Plus, Minus, Trash2, MapPin, Sliders, Users, Download, Upload, Volume2,
-  Move, Shield, Check, ArrowRight, ArrowLeft, ArrowUp, ArrowDown, Activity,
-  Layers, Package, Radio, Flame, Timer, Undo2, Redo2, Save, FolderOpen, Key, Flag, Zap,
-  ChevronDown, ChevronUp, Wrench, Camera, Video, ZoomIn, ZoomOut, Layout, Eye, EyeOff
+  Move, Shield, Check, ArrowRight, ArrowLeft, ArrowUp, ArrowDown,
+  ArrowLeftRight, ArrowUpDown, ArrowUpRight, ArrowDownRight,
+  Layers, Package, Flame, Undo2, Redo2, Save, Key, Flag, Zap,
+  ChevronDown, ChevronUp, Camera, Video, Layout, Eye, EyeOff,
+  Swords, Trophy, Clock, Square, Circle, RotateCw, Crosshair, Sword, Star, Copy,
+  Shuffle, Grid, Crown, Heart, MousePointer, Waves, Columns
 } from 'lucide-react';
 
 const HistoryContext = React.createContext<(() => void) | null>(null);
@@ -167,6 +179,7 @@ const NumberStepper: React.FC<NumberStepperProps> = ({
 export interface PaperDropdownOption {
   value: string;
   label: string;
+  icon?: React.ReactNode;
   colorSwatch?: string;
   badge?: string;
   subtitle?: string;
@@ -248,6 +261,9 @@ const PaperDropdown: React.FC<PaperDropdownProps> = ({
               style={{ backgroundColor: selectedOption.colorSwatch }}
             />
           )}
+          {selectedOption?.icon && (
+            <span className="shrink-0 flex items-center text-slate-800">{selectedOption.icon}</span>
+          )}
           <span className="truncate">
             {selectedOption ? selectedOption.label : placeholder}
           </span>
@@ -294,6 +310,9 @@ const PaperDropdown: React.FC<PaperDropdownProps> = ({
                       style={{ backgroundColor: opt.colorSwatch }}
                     />
                   )}
+                  {opt.icon && (
+                    <span className="shrink-0 flex items-center text-slate-800">{opt.icon}</span>
+                  )}
                   <div className="min-w-0">
                     <div className="text-[11px] leading-tight truncate">{opt.label}</div>
                     {opt.subtitle && (
@@ -333,7 +352,27 @@ interface EditorSceneProps {
   onSaveWorkspace?: (mapData: MapData, teams: TeamConfig[]) => void;
 }
 
-type EditorMode = 'select' | 'draw' | 'gate' | 'gate_v' | 'pickup' | 'barrier' | 'barrier_v' | 'spawn';
+type EditorMode =
+  | 'select'
+  | 'draw'
+  | 'draw_circle'
+  | 'draw_wall'
+  | 'gate'
+  | 'gate_v'
+  | 'barrier'
+  | 'barrier_v'
+  | 'barrier_static'
+  | 'spawn'
+  | 'pickup'
+  | 'star_dash'
+  | 'shield'
+  | 'knife'
+  | 'uzi'
+  | 'ump'
+  | 'ak'
+  | 'mini14'
+  | 'scar'
+  | 'delete';
 
 interface HistorySnapshot {
   corridors: CorridorRect[];
@@ -344,6 +383,9 @@ interface HistorySnapshot {
   baySpawns: BaySpawn[];
   wallTriggerMode: WallTriggerMode;
   wallTriggerTimer: number;
+  trackType: TrackType;
+  hideFinishZone: boolean;
+  battlerConfig: BattlerConfig;
   cameraConfig: CameraConfig;
   layoutConfig: SimulationLayoutConfig;
 }
@@ -359,6 +401,17 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
 
   // Track state
   const [mapName, setMapName] = useState(currentMap.name || 'Custom Circuit');
+  const [trackType, setTrackType] = useState<TrackType>(currentMap.trackType || 'races');
+  const [hideFinishZone, setHideFinishZone] = useState<boolean>(
+    currentMap.hideFinishZone !== undefined
+      ? currentMap.hideFinishZone
+      : currentMap.trackType === 'battler'
+  );
+  const [battlerConfig, setBattlerConfig] = useState<BattlerConfig>(
+    currentMap.battlerConfig
+      ? { ...DEFAULT_BATTLER_CONFIG, ...currentMap.battlerConfig }
+      : { ...DEFAULT_BATTLER_CONFIG }
+  );
   const [corridors, setCorridors] = useState<CorridorRect[]>(
     JSON.parse(JSON.stringify(currentMap.corridors || MAP_CLASSIC_SERPENTINE.corridors))
   );
@@ -437,9 +490,12 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     baySpawns: JSON.parse(JSON.stringify(baySpawns)),
     wallTriggerMode,
     wallTriggerTimer,
+    trackType,
+    hideFinishZone,
+    battlerConfig: { ...battlerConfig },
     cameraConfig: { ...cameraConfig },
     layoutConfig: { ...layoutConfig },
-  }), [corridors, gates, pickups, barriers, finishZone, baySpawns, wallTriggerMode, wallTriggerTimer, cameraConfig, layoutConfig]);
+  }), [corridors, gates, pickups, barriers, finishZone, baySpawns, wallTriggerMode, wallTriggerTimer, trackType, hideFinishZone, battlerConfig, cameraConfig, layoutConfig]);
 
   // Push snapshot to undo stack immediately
   const pushSnapshot = useCallback(() => {
@@ -467,6 +523,9 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     if (previous.baySpawns) setBaySpawns(previous.baySpawns);
     setWallTriggerMode(previous.wallTriggerMode);
     setWallTriggerTimer(previous.wallTriggerTimer);
+    if (previous.trackType) setTrackType(previous.trackType);
+    if (previous.hideFinishZone !== undefined) setHideFinishZone(previous.hideFinishZone);
+    if (previous.battlerConfig) setBattlerConfig(previous.battlerConfig);
     if (previous.cameraConfig) setCameraConfig(previous.cameraConfig);
     if (previous.layoutConfig) setLayoutConfig(previous.layoutConfig);
     clearSelection();
@@ -486,6 +545,9 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     if (next.baySpawns) setBaySpawns(next.baySpawns);
     setWallTriggerMode(next.wallTriggerMode);
     setWallTriggerTimer(next.wallTriggerTimer);
+    if (next.trackType) setTrackType(next.trackType);
+    if (next.hideFinishZone !== undefined) setHideFinishZone(next.hideFinishZone);
+    if (next.battlerConfig) setBattlerConfig(next.battlerConfig);
     if (next.cameraConfig) setCameraConfig(next.cameraConfig);
     if (next.layoutConfig) setLayoutConfig(next.layoutConfig);
     clearSelection();
@@ -505,9 +567,11 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
 
   // Roster state
   const [teamList, setTeamList] = useState<TeamConfig[]>(() => {
-    return teams.map(t => ({
+    return teams.map((t, idx) => ({
       ...t,
-      enabled: t.enabled !== undefined ? t.enabled : true
+      enabled: t.enabled !== undefined ? t.enabled : true,
+      maxHp: t.maxHp !== undefined ? t.maxHp : 100,
+      battleAlliance: t.battleAlliance || (idx < 4 ? 'A' : 'B'),
     }));
   });
 
@@ -522,6 +586,9 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     ...currentMap,
     id: currentMap.id || `custom_${Date.now()}`,
     name: mapName,
+    trackType,
+    hideFinishZone: trackType === 'battler' ? true : hideFinishZone,
+    battlerConfig: { ...battlerConfig },
     corridors,
     gates,
     pickups,
@@ -535,6 +602,9 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
   }), [
     currentMap,
     mapName,
+    trackType,
+    hideFinishZone,
+    battlerConfig,
     corridors,
     gates,
     pickups,
@@ -606,6 +676,9 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
   const handleLoadSavedSlot = (slotData: any) => {
     pushSnapshot();
     setMapName(slotData.name || 'Saved Circuit');
+    if (slotData.trackType) setTrackType(slotData.trackType);
+    if (slotData.hideFinishZone !== undefined) setHideFinishZone(slotData.hideFinishZone);
+    if (slotData.battlerConfig) setBattlerConfig({ ...DEFAULT_BATTLER_CONFIG, ...slotData.battlerConfig });
     if (slotData.corridors) setCorridors(slotData.corridors);
     if (slotData.gates) setGates(slotData.gates);
     if (slotData.pickups) setPickups(slotData.pickups);
@@ -1114,10 +1187,21 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     );
   };
 
-  // Preset loading
+  // Preset & Empty Circuit loading
   const handleLoadPreset = (preset: MapData) => {
     pushSnapshot();
     setMapName(preset.name);
+    setTrackType(preset.trackType || 'races');
+    setHideFinishZone(
+      preset.hideFinishZone !== undefined
+        ? preset.hideFinishZone
+        : preset.trackType === 'battler'
+    );
+    setBattlerConfig(
+      preset.battlerConfig
+        ? { ...DEFAULT_BATTLER_CONFIG, ...preset.battlerConfig }
+        : { ...DEFAULT_BATTLER_CONFIG }
+    );
     setCorridors(JSON.parse(JSON.stringify(preset.corridors)));
     setGates(JSON.parse(JSON.stringify(preset.gates)));
     setPickups(JSON.parse(JSON.stringify(preset.pickups)));
@@ -1139,6 +1223,12 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     clearSelection();
   };
 
+  const handleCreateEmptyCircuit = (mode: 'races' | 'battler' = 'races') => {
+    const emptyMap = createEmptyCircuit(mode);
+    handleLoadPreset(emptyMap);
+    setSaveToast(mode === 'battler' ? 'New Empty Battleground!' : 'New Empty Circuit!');
+    setTimeout(() => setSaveToast(null), 2200);
+  };
 
   // Add elements (defaults to current viewport center so limitless arenas place items right where the user is looking)
   const getViewCenter = () => ({
@@ -1149,7 +1239,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
   const handleAddCorridor = (
     x?: number, y?: number, w = 90, h = 60,
     hasMovingWall = false,
-    wallDirection: MovingWallDirection = 'right'
+    wallDirection: MovingWallDirection = 'right',
+    shape: 'rect' | 'circle' = 'rect'
   ) => {
     pushSnapshot();
     const { cx, cy } = getViewCenter();
@@ -1157,6 +1248,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     const finalY = y !== undefined ? y : Math.round((cy - h / 2) / 5) * 5;
     const newCorridor: CorridorRect = {
       x: finalX, y: finalY, w, h,
+      shape,
       hasMovingWall,
       wallDirection,
       wallSpeed: 55,
@@ -1260,7 +1352,19 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
   const handleItemToolPlacement = (e: React.PointerEvent<any>) => {
     if (editorMode === 'draw') {
       const { x, y } = getSVGCoords(e);
-      handleAddCorridor(Math.round((x - 40) / 5) * 5, Math.round((y - 25) / 5) * 5, 80, 50, false, 'right');
+      handleAddCorridor(Math.round((x - 45) / 5) * 5, Math.round((y - 30) / 5) * 5, 90, 60, false, 'right', 'rect');
+      e.stopPropagation();
+      return true;
+    }
+    if (editorMode === 'draw_circle') {
+      const { x, y } = getSVGCoords(e);
+      handleAddCorridor(Math.round((x - 85) / 5) * 5, Math.round((y - 85) / 5) * 5, 170, 170, false, 'right', 'circle');
+      e.stopPropagation();
+      return true;
+    }
+    if (editorMode === 'draw_wall') {
+      const { x, y } = getSVGCoords(e);
+      handleAddCorridor(Math.round((x - 35) / 5) * 5, Math.round((y - 80) / 5) * 5, 70, 160, true, 'up', 'rect');
       e.stopPropagation();
       return true;
     }
@@ -1276,12 +1380,6 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
       e.stopPropagation();
       return true;
     }
-    if (editorMode === 'pickup') {
-      const { x, y } = getSVGCoords(e);
-      handleAddPickup('cherry_clone', x, y);
-      e.stopPropagation();
-      return true;
-    }
     if (editorMode === 'barrier') {
       const { x, y } = getSVGCoords(e);
       handleAddBarrier(Math.round((x - 30) / 5) * 5, Math.round((y - 8) / 5) * 5, 60, 16, 'horizontal');
@@ -1291,6 +1389,29 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
     if (editorMode === 'barrier_v') {
       const { x, y } = getSVGCoords(e);
       handleAddBarrier(Math.round((x - 8) / 5) * 5, Math.round((y - 30) / 5) * 5, 16, 60, 'vertical');
+      e.stopPropagation();
+      return true;
+    }
+    if (editorMode === 'barrier_static') {
+      const { x, y } = getSVGCoords(e);
+      handleAddBarrier(Math.round((x - 30) / 5) * 5, Math.round((y - 8) / 5) * 5, 60, 16, 'static');
+      e.stopPropagation();
+      return true;
+    }
+    if (
+      editorMode === 'pickup' ||
+      editorMode === 'star_dash' ||
+      editorMode === 'shield' ||
+      editorMode === 'knife' ||
+      editorMode === 'uzi' ||
+      editorMode === 'ump' ||
+      editorMode === 'ak' ||
+      editorMode === 'mini14' ||
+      editorMode === 'scar'
+    ) {
+      const { x, y } = getSVGCoords(e);
+      const itemType = editorMode === 'pickup' ? 'cherry_clone' : editorMode;
+      handleAddPickup(itemType, x, y);
       e.stopPropagation();
       return true;
     }
@@ -1524,6 +1645,9 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
       ...currentMap,
       id: `custom_${Date.now()}`,
       name: mapName,
+      trackType,
+      hideFinishZone: trackType === 'battler' ? true : hideFinishZone,
+      battlerConfig: { ...battlerConfig },
       corridors,
       gates,
       pickups,
@@ -1541,6 +1665,9 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
   const handleExportJSON = () => {
     const data = JSON.stringify({
       name: mapName,
+      trackType,
+      hideFinishZone,
+      battlerConfig,
       corridors,
       gates,
       pickups,
@@ -1571,6 +1698,9 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
       try {
         const json = JSON.parse(event.target?.result as string);
         pushSnapshot();
+        if (json.trackType) setTrackType(json.trackType);
+        if (json.hideFinishZone !== undefined) setHideFinishZone(json.hideFinishZone);
+        if (json.battlerConfig) setBattlerConfig({ ...DEFAULT_BATTLER_CONFIG, ...json.battlerConfig });
         if (json.corridors) setCorridors(json.corridors);
         if (json.gates) setGates(json.gates);
         if (json.pickups) setPickups(json.pickups);
@@ -1705,245 +1835,6 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
               onTouchEnd={handleCanvasTouchEnd}
               onTouchCancel={handleCanvasTouchEnd}
             >
-
-              {/* Collapsible Canvas Floating Toolbar */}
-              {!isToolbarOpen ? (
-                <button
-                  type="button"
-                  onClick={() => setIsToolbarOpen(true)}
-                  className="absolute top-2 left-2 z-20 paper-btn bg-white/95 text-xs px-2.5 py-1 font-black text-slate-900 flex items-center gap-1.5 shadow-md hover:bg-slate-100 cursor-pointer"
-                  title="Open Tool Bar"
-                >
-                  <Wrench className="w-3.5 h-3.5 text-slate-700" />
-                  <span>TOOLS ({editorMode.toUpperCase()})</span>
-                  <ChevronDown className="w-3.5 h-3.5 text-slate-500" />
-                </button>
-              ) : (
-                <div className="absolute top-2 left-2 z-20 flex flex-wrap items-center gap-1 bg-white/95 paper-card px-2 py-1 shadow-md border-2 border-slate-900 max-w-[96%]">
-                  {/* Close / Hide Toolbar */}
-                  <button
-                    type="button"
-                    onClick={() => setIsToolbarOpen(false)}
-                    className="paper-btn bg-slate-100 hover:bg-slate-200 text-[10px] px-1.5 py-0.5 font-black flex items-center gap-0.5 text-slate-700"
-                    title="Hide / Close Tool Bar"
-                  >
-                    <ChevronUp className="w-3 h-3" />
-                    <span className="hidden xs:inline">Close</span>
-                  </button>
-                  <div className="h-4 w-[1px] bg-slate-300 mx-0.5"></div>
-
-                  {/* Creation & Placement Tools */}
-                  <span className="text-[10px] font-extrabold text-slate-700 mr-0.5">TOOLS:</span>
-                  <button
-                    type="button"
-                    onClick={() => setEditorMode('select')}
-                    className={`paper-btn text-[10px] px-2 py-0.5 font-bold ${
-                      editorMode === 'select' ? '!bg-amber-300 !text-slate-950 font-black' : 'bg-slate-100 text-slate-800'
-                    }`}
-                    title="Select & drag corridor blocks, gates, barriers, and finish alcove"
-                  >
-                    <Move className="w-3 h-3 inline mr-0.5" /> Move
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditorMode('draw')}
-                    className={`paper-btn text-[10px] px-2 py-0.5 font-bold ${
-                      editorMode === 'draw' ? '!bg-emerald-300 !text-slate-950 font-black' : 'bg-slate-100 text-slate-800'
-                    }`}
-                    title="Click anywhere to stamp new corridor segment"
-                  >
-                    <Plus className="w-3 h-3 inline mr-0.5" /> +Corridor
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditorMode('gate')}
-                    className={`paper-btn text-[10px] px-2 py-0.5 font-bold ${
-                      editorMode === 'gate' ? '!bg-purple-300 !text-slate-950 font-black' : 'bg-slate-100 text-slate-800'
-                    }`}
-                    title="Click anywhere to place Horizontal Gate (H)"
-                  >
-                    <Shield className="w-3 h-3 inline mr-0.5" /> +Gate H
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditorMode('gate_v')}
-                    className={`paper-btn text-[10px] px-2 py-0.5 font-bold ${
-                      editorMode === 'gate_v' ? '!bg-purple-300 !text-slate-950 font-black' : 'bg-slate-100 text-slate-800'
-                    }`}
-                    title="Click anywhere to place Vertical Gate (V)"
-                  >
-                    <Shield className="w-3 h-3 inline mr-0.5" /> +Gate V
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditorMode('barrier')}
-                    className={`paper-btn text-[10px] px-2 py-0.5 font-bold ${
-                      editorMode === 'barrier' ? '!bg-amber-400 !text-slate-950 font-black' : 'bg-slate-100 text-slate-800'
-                    }`}
-                    title="Click anywhere to drop Horizontal Barrier (↔)"
-                  >
-                    <Zap className="w-3 h-3 inline mr-0.5 text-amber-600" /> +Bar H
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditorMode('barrier_v')}
-                    className={`paper-btn text-[10px] px-2 py-0.5 font-bold ${
-                      editorMode === 'barrier_v' ? '!bg-amber-400 !text-slate-950 font-black' : 'bg-slate-100 text-slate-800'
-                    }`}
-                    title="Click anywhere to drop Vertical Barrier (↕)"
-                  >
-                    <Zap className="w-3 h-3 inline mr-0.5 text-amber-600" /> +Bar V
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setEditorMode('pickup')}
-                    className={`paper-btn text-[10px] px-2 py-0.5 font-bold ${
-                      editorMode === 'pickup' ? '!bg-rose-300 !text-slate-950 font-black' : 'bg-slate-100 text-slate-800'
-                    }`}
-                    title="Click anywhere to drop cherry pickup item"
-                  >
-                    🍒 +Item
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setEditorMode('spawn');
-                      clearSelection();
-                      setIsSpawnGroupSelected(true);
-                      setInspectorTab('track_editor');
-                    }}
-                    className={`paper-btn text-[10px] px-2 py-0.5 font-bold ${
-                      editorMode === 'spawn' ? '!bg-sky-300 !text-slate-950 font-black' : 'bg-slate-100 text-slate-800'
-                    }`}
-                    title="Click any corridor or point on the map to place the racer spawn zone there"
-                  >
-                    🏁 +Spawn
-                  </button>
-
-                  <div className="h-4 w-[1px] bg-slate-300 mx-0.5"></div>
-
-                  {/* Viewport Aspect Ratio Quick Selector (1:1, 16:9, 4:3, Full) */}
-                  <span className="text-[10px] font-extrabold text-slate-700 mr-0.5">RATIO:</span>
-                  {(['1:1', '16:9', '4:3', 'auto'] as ViewportAspectRatio[]).map(ratio => {
-                    const isRatioActive = (layoutConfig.aspectRatio || '4:3') === ratio;
-                    return (
-                      <button
-                        key={ratio}
-                        type="button"
-                        onClick={() => {
-                          pushSnapshot();
-                          setLayoutConfig(prev => ({ ...prev, aspectRatio: ratio }));
-                        }}
-                        className={`paper-btn px-1.5 py-0.5 text-[10px] font-black cursor-pointer ${
-                          isRatioActive
-                            ? '!bg-amber-300 !text-slate-950'
-                            : 'bg-white hover:bg-slate-100 text-slate-700'
-                        }`}
-                        title={`Set Viewport Aspect Ratio to ${ratio === 'auto' ? 'Full Container' : ratio}`}
-                      >
-                        {ratio === 'auto' ? 'Full' : ratio}
-                      </button>
-                    );
-                  })}
-
-                  <div className="h-4 w-[1px] bg-slate-300 mx-0.5"></div>
-
-                  {/* Canvas View Zoom & Reset Controls */}
-                  <span className="text-[10px] font-extrabold text-slate-700 mr-0.5">VIEW:</span>
-                  <button
-                    type="button"
-                    onClick={() => setCanvasZoom(prev => Math.max(0.08, Math.round((prev - 0.15) * 100) / 100))}
-                    className="paper-btn bg-white hover:bg-slate-100 px-1.5 py-0.5 text-[10px] font-black flex items-center text-slate-800"
-                    title="Zoom Out Canvas"
-                  >
-                    <Minus className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setCanvasZoom(1.0); setCanvasPan({ x: 0, y: 0 }); }}
-                    className="paper-btn bg-white hover:bg-slate-100 px-1.5 py-0.5 text-[10px] font-black text-slate-800 cursor-pointer"
-                    title="Reset Zoom to 100%"
-                  >
-                    {Math.round(canvasZoom * 100)}%
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCanvasZoom(prev => Math.min(6.0, Math.round((prev + 0.15) * 100) / 100))}
-                    className="paper-btn bg-white hover:bg-slate-100 px-1.5 py-0.5 text-[10px] font-black flex items-center text-slate-800"
-                    title="Zoom In Canvas"
-                  >
-                    <Plus className="w-3 h-3" />
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => { setCanvasZoom(1.0); setCanvasPan({ x: 0, y: 0 }); }}
-                    className="paper-btn bg-sky-100 hover:bg-sky-200 px-1.5 py-0.5 text-[10px] font-black text-sky-950"
-                    title="Center and Reset Track View"
-                  >
-                    Reset View
-                  </button>
-
-                  <div className="h-4 w-[1px] bg-slate-300 mx-0.5"></div>
-
-                  {/* History & Manual Save System in Toolbar */}
-                  <button
-                    type="button"
-                    onClick={handleUndo}
-                    disabled={undoStack.length === 0}
-                    className="paper-btn bg-white hover:bg-slate-100 disabled:opacity-40 px-1.5 py-0.5 text-[10px] font-black flex items-center gap-0.5 text-slate-800"
-                    title="Undo last change"
-                  >
-                    <Undo2 className="w-3 h-3" />
-                    <span className="hidden sm:inline">Undo</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={handleRedo}
-                    disabled={redoStack.length === 0}
-                    className="paper-btn bg-white hover:bg-slate-100 disabled:opacity-40 px-1.5 py-0.5 text-[10px] font-black flex items-center gap-0.5 text-slate-800"
-                    title="Redo previous change"
-                  >
-                    <Redo2 className="w-3 h-3" />
-                    <span className="hidden sm:inline">Redo</span>
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={handleSaveTrack}
-                    className="paper-btn bg-amber-200 hover:bg-amber-300 px-2 py-0.5 text-[10px] font-black flex items-center gap-0.5 text-amber-950"
-                    title="Manually save current track to local browser storage"
-                  >
-                    <Save className="w-3 h-3" />
-                    <span>Save</span>
-                  </button>
-
-                  {savedSlots.length > 0 && (
-                    <PaperDropdown
-                      value=""
-                      compact
-                      resetOnSelect
-                      placeholder={`📂 Load (${savedSlots.length})`}
-                      className="min-w-[96px]"
-                      options={savedSlots.map(s => ({
-                        value: s.name,
-                        label: s.name,
-                        badge: s.date,
-                      }))}
-                      onChange={(val) => {
-                        const slot = savedSlots.find(s => s.name === val);
-                        if (slot) handleLoadSavedSlot(slot.data);
-                      }}
-                    />
-                  )}
-
-                  {saveToast && (
-                    <span className="bg-emerald-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow animate-fade-in">
-                      ✓ {saveToast}
-                    </span>
-                  )}
-                </div>
-              )}
-
               {/* SVG Canvas with Dynamic Pan, Zoom, and Exact Container Aspect Ratio */}
               <svg
                 ref={svgRef}
@@ -1974,60 +1865,108 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                   pointerEvents="none"
                 />
 
-                {/* 1. Track Shadow Layer */}
-                {corridors.map((c, i) => (
-                  <rect key={`sh_${i}`} x={c.x + 4} y={c.y + 5} width={c.w} height={c.h} fill="rgba(15,23,42,0.3)" pointerEvents="none" />
-                ))}
+                {/* 1. Track Shadow Layer (Supports Rect & Circle Rooms) */}
+                {corridors.map((c, i) =>
+                  c.shape === 'circle' ? (
+                    <ellipse
+                      key={`sh_${i}`}
+                      cx={c.x + c.w / 2 + 4}
+                      cy={c.y + c.h / 2 + 5}
+                      rx={Math.max(4, c.w / 2)}
+                      ry={Math.max(4, c.h / 2)}
+                      fill="rgba(15,23,42,0.3)"
+                      pointerEvents="none"
+                    />
+                  ) : (
+                    <rect key={`sh_${i}`} x={c.x + 4} y={c.y + 5} width={c.w} height={c.h} fill="rgba(15,23,42,0.3)" pointerEvents="none" />
+                  )
+                )}
 
-                {/* 2. Track Cutout Border */}
-                {corridors.map((c, i) => (
-                  <rect key={`br_${i}`} x={c.x - 2.5} y={c.y - 2.5} width={c.w + 5} height={c.h + 5} fill="#0f172a" pointerEvents="none" />
-                ))}
+                {/* 2. Track Cutout Border (Supports Rect & Circle Rooms) */}
+                {corridors.map((c, i) =>
+                  c.shape === 'circle' ? (
+                    <ellipse
+                      key={`br_${i}`}
+                      cx={c.x + c.w / 2}
+                      cy={c.y + c.h / 2}
+                      rx={Math.max(4, c.w / 2 + 2.5)}
+                      ry={Math.max(4, c.h / 2 + 2.5)}
+                      fill="#0f172a"
+                      pointerEvents="none"
+                    />
+                  ) : (
+                    <rect key={`br_${i}`} x={c.x - 2.5} y={c.y - 2.5} width={c.w + 5} height={c.h + 5} fill="#0f172a" pointerEvents="none" />
+                  )
+                )}
 
-                {/* 3. Walkable Corridors (Normal or Moving Wall) */}
+                {/* 3. Walkable Corridors & Circle Rooms (Normal or Moving Wall) */}
                 {corridors.map((c, i) => {
                   const isSelected = selectedCorridorIdx === i;
                   const hasWall = !!c.hasMovingWall;
                   const wallDir = c.wallDirection || 'right';
+                  const isCircle = c.shape === 'circle';
 
                   // Normal = white #f8fafc, Moving Wall corridor = soft cyan tint #e0f2fe
                   const fillColor = isSelected
                     ? '#fef08a'
                     : hasWall ? '#e0f2fe' : '#f8fafc';
 
+                  const onCorridorPointerDown = (e: React.PointerEvent<any>) => {
+                    if (editorMode === 'delete') {
+                      e.stopPropagation();
+                      pushSnapshot();
+                      setCorridors(prev => prev.filter((_, idx) => idx !== i));
+                      clearSelection();
+                      return;
+                    }
+                    if (handleItemToolPlacement(e)) return;
+                    e.stopPropagation();
+                    prepareDragSnapshot();
+                    setSelectedCorridorIdx(i);
+                    setSelectedGateIdx(null);
+                    setSelectedPickupIdx(null);
+                    setSelectedBarrierIdx(null);
+                    setIsFinishSelected(false);
+                    setInspectorTab('track_editor');
+                    const { x, y } = getSVGCoords(e);
+
+                    setDragState({
+                      type: 'corridor',
+                      index: i,
+                      startX: x,
+                      startY: y,
+                      origX: c.x,
+                      origY: c.y,
+                    });
+                  };
+
                   return (
                     <g key={`cor_${i}`}>
-                      <rect
-                        x={c.x}
-                        y={c.y}
-                        width={c.w}
-                        height={c.h}
-                        fill={fillColor}
-                        stroke={isSelected ? '#d97706' : hasWall ? '#0284c7' : '#94a3b8'}
-                        strokeWidth={isSelected ? '2.5' : hasWall ? '1.5' : '1'}
-                        className={editorMode === 'select' ? "cursor-move transition-colors" : "cursor-crosshair transition-colors"}
-                        onPointerDown={(e) => {
-                          if (handleItemToolPlacement(e)) return;
-                          e.stopPropagation();
-                          prepareDragSnapshot();
-                          setSelectedCorridorIdx(i);
-                          setSelectedGateIdx(null);
-                          setSelectedPickupIdx(null);
-                          setSelectedBarrierIdx(null);
-                          setIsFinishSelected(false);
-                          setInspectorTab('track_editor');
-                          const { x, y } = getSVGCoords(e);
-
-                          setDragState({
-                            type: 'corridor',
-                            index: i,
-                            startX: x,
-                            startY: y,
-                            origX: c.x,
-                            origY: c.y,
-                          });
-                        }}
-                      />
+                      {isCircle ? (
+                        <ellipse
+                          cx={c.x + c.w / 2}
+                          cy={c.y + c.h / 2}
+                          rx={Math.max(4, c.w / 2)}
+                          ry={Math.max(4, c.h / 2)}
+                          fill={fillColor}
+                          stroke={isSelected ? '#d97706' : hasWall ? '#0284c7' : '#94a3b8'}
+                          strokeWidth={isSelected ? '2.5' : hasWall ? '1.5' : '1'}
+                          className={editorMode === 'select' ? 'cursor-move transition-colors' : 'cursor-crosshair transition-colors'}
+                          onPointerDown={onCorridorPointerDown}
+                        />
+                      ) : (
+                        <rect
+                          x={c.x}
+                          y={c.y}
+                          width={c.w}
+                          height={c.h}
+                          fill={fillColor}
+                          stroke={isSelected ? '#d97706' : hasWall ? '#0284c7' : '#94a3b8'}
+                          strokeWidth={isSelected ? '2.5' : hasWall ? '1.5' : '1'}
+                          className={editorMode === 'select' ? 'cursor-move transition-colors' : 'cursor-crosshair transition-colors'}
+                          onPointerDown={onCorridorPointerDown}
+                        />
+                      )}
 
                       {/* Moving wall indicator badge and directional arrow */}
                       {hasWall && (
@@ -2064,79 +2003,81 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                           fontWeight="bold"
                           pointerEvents="none"
                         >
-                          #{i + 1}
+                          #{i + 1} {isCircle ? 'CIRCLE' : ''}
                         </text>
                       )}
                     </g>
                   );
                 })}
 
-                {/* 4. Finish Zone Alcove (Draggable, Rotatable & Configurable) */}
-                <g
-                  transform={`rotate(${finishZone.rotation || 0} ${finishZone.x + finishZone.w / 2} ${finishZone.y + finishZone.h / 2})`}
-                  className={editorMode === 'select' ? "cursor-move" : "cursor-crosshair"}
-                  onPointerDown={(e) => {
-                    if (handleItemToolPlacement(e)) return;
-                    e.stopPropagation();
-                    prepareDragSnapshot();
-                    setIsFinishSelected(true);
-                    setSelectedCorridorIdx(null);
-                    setSelectedGateIdx(null);
-                    setSelectedPickupIdx(null);
-                    setSelectedBarrierIdx(null);
-                    setInspectorTab('track_editor');
-                    const { x, y } = getSVGCoords(e);
+                {/* 4. Finish Zone Alcove (Hidden in Battler Mode or when hideFinishZone is true) */}
+                {!hideFinishZone && trackType !== 'battler' && (
+                  <g
+                    transform={`rotate(${finishZone.rotation || 0} ${finishZone.x + finishZone.w / 2} ${finishZone.y + finishZone.h / 2})`}
+                    className={editorMode === 'select' ? "cursor-move" : "cursor-crosshair"}
+                    onPointerDown={(e) => {
+                      if (handleItemToolPlacement(e)) return;
+                      e.stopPropagation();
+                      prepareDragSnapshot();
+                      setIsFinishSelected(true);
+                      setSelectedCorridorIdx(null);
+                      setSelectedGateIdx(null);
+                      setSelectedPickupIdx(null);
+                      setSelectedBarrierIdx(null);
+                      setInspectorTab('track_editor');
+                      const { x, y } = getSVGCoords(e);
 
-                    setDragState({
-                      type: 'finish',
-                      index: 0,
-                      startX: x,
-                      startY: y,
-                      origX: finishZone.x,
-                      origY: finishZone.y,
-                    });
-                  }}
-                >
-                  <rect
-                    x={finishZone.x}
-                    y={finishZone.y}
-                    width={finishZone.w}
-                    height={finishZone.h}
-                    fill={isFinishSelected ? '#86efac' : '#4ade80'}
-                    stroke={isFinishSelected ? '#15803d' : '#0f172a'}
-                    strokeWidth={isFinishSelected ? '3.5' : '2.5'}
-                  />
-                  <rect
-                    x={finishZone.x}
-                    y={finishZone.y + finishZone.h - 14}
-                    width={finishZone.w}
-                    height={14}
-                    fill="#0f172a"
-                  />
-                  <text
-                    x={finishZone.x + finishZone.w / 2}
-                    y={finishZone.y + Math.max(12, (finishZone.h - 14) / 2 + 4)}
-                    textAnchor="middle"
-                    fill="#0f172a"
-                    fontSize="10"
-                    fontWeight="900"
-                    pointerEvents="none"
+                      setDragState({
+                        type: 'finish',
+                        index: 0,
+                        startX: x,
+                        startY: y,
+                        origX: finishZone.x,
+                        origY: finishZone.y,
+                      });
+                    }}
                   >
-                    FINISH{finishZone.rotation ? ` (${finishZone.rotation}°)` : ''}
-                  </text>
-                  {/* Checkered pattern inside finish line */}
-                  {Array.from({ length: 6 }).map((_, cIdx) => (
                     <rect
-                      key={`ch_${cIdx}`}
-                      x={finishZone.x + cIdx * (finishZone.w / 6)}
-                      y={finishZone.y + finishZone.h - 14 + (cIdx % 2 === 0 ? 0 : 7)}
-                      width={finishZone.w / 6}
-                      height={7}
-                      fill="#ffffff"
-                      pointerEvents="none"
+                      x={finishZone.x}
+                      y={finishZone.y}
+                      width={finishZone.w}
+                      height={finishZone.h}
+                      fill={isFinishSelected ? '#86efac' : '#4ade80'}
+                      stroke={isFinishSelected ? '#15803d' : '#0f172a'}
+                      strokeWidth={isFinishSelected ? '3.5' : '2.5'}
                     />
-                  ))}
-                </g>
+                    <rect
+                      x={finishZone.x}
+                      y={finishZone.y + finishZone.h - 14}
+                      width={finishZone.w}
+                      height={14}
+                      fill="#0f172a"
+                    />
+                    <text
+                      x={finishZone.x + finishZone.w / 2}
+                      y={finishZone.y + Math.max(12, (finishZone.h - 14) / 2 + 4)}
+                      textAnchor="middle"
+                      fill="#0f172a"
+                      fontSize="10"
+                      fontWeight="900"
+                      pointerEvents="none"
+                    >
+                      FINISH{finishZone.rotation ? ` (${finishZone.rotation}°)` : ''}
+                    </text>
+                    {/* Checkered pattern inside finish line */}
+                    {Array.from({ length: 6 }).map((_, cIdx) => (
+                      <rect
+                        key={`ch_${cIdx}`}
+                        x={finishZone.x + cIdx * (finishZone.w / 6)}
+                        y={finishZone.y + finishZone.h - 14 + (cIdx % 2 === 0 ? 0 : 7)}
+                        width={finishZone.w / 6}
+                        height={7}
+                        fill="#ffffff"
+                        pointerEvents="none"
+                      />
+                    ))}
+                  </g>
+                )}
 
                 {/* 5. Destructible & Key-Locked Gates (Horizontal & Vertical) */}
                 {gates.map((g, i) => {
@@ -2148,6 +2089,13 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                       key={`gate_${i}`}
                       className={editorMode === 'select' ? "cursor-move" : "cursor-crosshair"}
                       onPointerDown={(e) => {
+                        if (editorMode === 'delete') {
+                          e.stopPropagation();
+                          pushSnapshot();
+                          setGates(prev => prev.filter((_, idx) => idx !== i));
+                          clearSelection();
+                          return;
+                        }
                         if (handleItemToolPlacement(e)) return;
                         e.stopPropagation();
                         prepareDragSnapshot();
@@ -2197,11 +2145,11 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                           textAnchor="middle"
                           dominantBaseline="middle"
                           fill="#0f172a"
-                          fontSize="9"
+                          fontSize="8.5"
                           fontWeight="900"
                           pointerEvents="none"
                         >
-                          🔑 {keyTeam.name.slice(0, 3)}
+                          KEY:{keyTeam.name.slice(0, 3)}
                         </text>
                       )}
                     </g>
@@ -2217,6 +2165,13 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                       key={`barr_${i}`}
                       className={editorMode === 'select' ? "cursor-move" : "cursor-crosshair"}
                       onPointerDown={(e) => {
+                        if (editorMode === 'delete') {
+                          e.stopPropagation();
+                          pushSnapshot();
+                          setBarriers(prev => prev.filter((_, idx) => idx !== i));
+                          clearSelection();
+                          return;
+                        }
                         if (handleItemToolPlacement(e)) return;
                         e.stopPropagation();
                         prepareDragSnapshot();
@@ -2253,34 +2208,70 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         textAnchor="middle"
                         dominantBaseline="middle"
                         fill="#ffffff"
-                        fontSize="8"
+                        fontSize="7.5"
                         fontWeight="bold"
                         pointerEvents="none"
                       >
-                        {b.movement === 'static' ? (isVert ? '↕ BAR' : 'BARRIER') : (
-                          b.movement === 'horizontal' ? '↔' :
-                          b.movement === 'vertical' ? '↕' :
-                          b.movement === 'diagonal_up' ? '↗' : '↘'
+                        {b.movement === 'static' ? (isVert ? 'V-BAR' : 'BARRIER') : (
+                          b.movement === 'horizontal' ? 'H-MOV' :
+                          b.movement === 'vertical' ? 'V-MOV' :
+                          b.movement === 'diagonal_up' ? 'D-UP' : 'D-DN'
                         )}
                       </text>
                     </g>
                   );
                 })}
 
-                {/* 7. Pickups */}
+                {/* 7. Pickups & Weapons */}
                 {pickups.map((p, i) => {
                   const isSelected = selectedPickupIdx === i;
+                  const isGun =
+                    p.type === 'uzi' ||
+                    p.type === 'ump' ||
+                    p.type === 'ak' ||
+                    p.type === 'mini14' ||
+                    p.type === 'scar';
+                  const pickupFill =
+                    p.type === 'knife'
+                      ? '#f1f5f9'
+                      : isGun
+                      ? '#fde047'
+                      : p.type === 'shield'
+                      ? '#38bdf8'
+                      : p.type === 'star_dash'
+                      ? '#facc15'
+                      : '#ef4444';
+                  const shortTag =
+                    p.type === 'uzi'
+                      ? 'UZI'
+                      : p.type === 'ump'
+                      ? 'UMP'
+                      : p.type === 'ak'
+                      ? 'AK'
+                      : p.type === 'mini14'
+                      ? 'M14'
+                      : p.type === 'scar'
+                      ? 'SCR'
+                      : p.type === 'knife'
+                      ? 'KNF'
+                      : p.type === 'shield'
+                      ? 'SHD'
+                      : p.type === 'star_dash'
+                      ? 'STR'
+                      : 'CHY';
+
                   return (
-                    <circle
+                    <g
                       key={`pick_${i}`}
-                      cx={p.x}
-                      cy={p.y}
-                      r="9"
-                      fill={p.type === 'knife' ? '#f1f5f9' : '#ef4444'}
-                      stroke={isSelected ? '#facc15' : '#0f172a'}
-                      strokeWidth="2"
-                      className={editorMode === 'select' ? "cursor-move" : "cursor-crosshair"}
+                      className={editorMode === 'select' ? 'cursor-move' : 'cursor-crosshair'}
                       onPointerDown={(e) => {
+                        if (editorMode === 'delete') {
+                          e.stopPropagation();
+                          pushSnapshot();
+                          setPickups(prev => prev.filter((_, idx) => idx !== i));
+                          clearSelection();
+                          return;
+                        }
                         if (handleItemToolPlacement(e)) return;
                         e.stopPropagation();
                         prepareDragSnapshot();
@@ -2301,7 +2292,27 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                           origY: p.y,
                         });
                       }}
-                    />
+                    >
+                      <circle
+                        cx={p.x}
+                        cy={p.y}
+                        r="11"
+                        fill={pickupFill}
+                        stroke={isSelected ? '#0284c7' : '#0f172a'}
+                        strokeWidth={isSelected ? '3' : '2'}
+                      />
+                      <text
+                        x={p.x}
+                        y={p.y + 3}
+                        textAnchor="middle"
+                        fill="#0f172a"
+                        fontSize="6.8"
+                        fontWeight="900"
+                        pointerEvents="none"
+                      >
+                        {shortTag}
+                      </text>
+                    </g>
                   );
                 })}
 
@@ -2364,7 +2375,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         letterSpacing="0.3"
                         pointerEvents="none"
                       >
-                        🏁 SPAWNS (DRAG ALL)
+                        SPAWNS (DRAG ALL)
                       </text>
                     </g>
 
@@ -2526,7 +2537,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                     fontWeight="900"
                     letterSpacing="0.4"
                   >
-                    🎥 CAM FOV ({Math.round(camPreviewRect.zoom * 100)}%)
+                    CAM FOV ({Math.round(camPreviewRect.zoom * 100)}%)
                   </text>
                   {/* Crosshair at center */}
                   <circle cx={previewCamCenter.x} cy={previewCamCenter.y} r="3" fill="#0284c7" />
@@ -2576,8 +2587,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                 {/* Save Inspector Changes Button + Portrait Drawer Toggle */}
                 <div className="flex items-center gap-1 shrink-0">
                   {saveToast && (
-                    <span className="bg-emerald-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-xs truncate max-w-[110px]">
-                      ✓ {saveToast}
+                    <span className="bg-emerald-600 text-white text-[9px] font-black px-1.5 py-0.5 rounded shadow-xs truncate max-w-[110px] flex items-center gap-0.5">
+                      <Check className="w-2.5 h-2.5 stroke-[3] shrink-0" /> {saveToast}
                     </span>
                   )}
                   <button
@@ -2731,143 +2742,83 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                       </div>
                     )}
                   </div>
-                  {/* Preset Maps List */}
+                  {/* Create New Empty Circuit */}
+                  <div className="paper-card bg-sky-50/90 p-2 border border-sky-400 space-y-1.5 shadow-xs">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-black uppercase text-sky-950 tracking-wider">
+                        New Empty Circuit
+                      </span>
+                      <span className="text-[9px] font-bold text-sky-700">Fresh Canvas</span>
+                    </div>
+                    <div className="grid grid-cols-2 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => handleCreateEmptyCircuit('races')}
+                        className="paper-btn bg-white hover:bg-emerald-100 text-[10px] py-1 font-black text-slate-900 flex items-center justify-center gap-1 cursor-pointer"
+                        title="Create a new empty Classic Race circuit with a starting bay and finish line"
+                      >
+                        <Plus className="w-3 h-3 text-emerald-700" /> Empty Race
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleCreateEmptyCircuit('battler')}
+                        className="paper-btn bg-white hover:bg-rose-100 text-[10px] py-1 font-black text-slate-900 flex items-center justify-center gap-1 cursor-pointer"
+                        title="Create a new empty Circular Battleground without finish line"
+                      >
+                        <Plus className="w-3 h-3 text-rose-700" /> Empty Battler
+                      </button>
+                    </div>
+                  </div>
+
+                  {/* Preset Maps List (Including Battleground Circle Arena) */}
                   <div className="paper-card bg-amber-50/90 p-2 border border-slate-400 space-y-1.5 shadow-xs">
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] font-black uppercase text-slate-800 tracking-wider">
                         Preset Circuits
                       </span>
-                      <span className="text-[9px] font-bold text-slate-500">Quick Load</span>
+                      <span className="text-[9px] font-bold text-slate-500">Races & Battler</span>
                     </div>
-                    <div className="grid grid-cols-3 gap-1">
+                    <div className="grid grid-cols-2 gap-1">
                       <button
                         type="button"
                         onClick={() => handleLoadPreset(MAP_CLASSIC_SERPENTINE)}
-                        className={`paper-btn text-[10px] py-1 font-bold ${
+                        className={`paper-btn text-[10px] py-1 font-bold cursor-pointer ${
                           mapName === MAP_CLASSIC_SERPENTINE.name ? 'bg-emerald-200 text-slate-950 font-black' : 'bg-white hover:bg-slate-100 text-slate-800'
                         }`}
-                        title="Load Circuit 1: Serpentine Tower"
+                        title="Load Circuit 1: Serpentine Tower (Classic Race)"
                       >
                         1. Serpentine
                       </button>
                       <button
                         type="button"
                         onClick={() => handleLoadPreset(MAP_DOUBLE_HELIX)}
-                        className={`paper-btn text-[10px] py-1 font-bold ${
+                        className={`paper-btn text-[10px] py-1 font-bold cursor-pointer ${
                           mapName === MAP_DOUBLE_HELIX.name ? 'bg-sky-200 text-slate-950 font-black' : 'bg-white hover:bg-slate-100 text-slate-800'
                         }`}
-                        title="Load Circuit 2: Whirlpool Spiral"
+                        title="Load Circuit 2: Whirlpool Spiral (Classic Race)"
                       >
                         2. Spiral
                       </button>
                       <button
                         type="button"
                         onClick={() => handleLoadPreset(MAP_ARENA_GAUNTLET)}
-                        className={`paper-btn text-[10px] py-1 font-bold ${
+                        className={`paper-btn text-[10px] py-1 font-bold cursor-pointer ${
                           mapName === MAP_ARENA_GAUNTLET.name ? 'bg-amber-200 text-slate-950 font-black' : 'bg-white hover:bg-slate-100 text-slate-800'
                         }`}
-                        title="Load Circuit 3: Crossfire Citadel"
+                        title="Load Circuit 3: Crossfire Citadel (Classic Race)"
                       >
                         3. Citadel
                       </button>
-                    </div>
-                  </div>
-
-                  {/* Stamp Preset Tiles Palette */}
-                  <div className="paper-card bg-white p-2 border border-slate-300 space-y-1.5 shadow-xs">
-                    <div className="flex items-center justify-between">
-                      <span className="text-[10px] font-black uppercase text-slate-800 tracking-wider">
-                        Stamp Preset Tiles
-                      </span>
-                      <span className="text-[9px] font-bold text-slate-500">Click to place</span>
-                    </div>
-
-                    <span className="text-[9px] font-bold text-slate-500 uppercase block pt-0.5">Corridors:</span>
-                    <div className="grid grid-cols-2 gap-1">
                       <button
                         type="button"
-                        onClick={() => handleAddCorridor(undefined, undefined, 90, 60, false)}
-                        className="paper-btn bg-emerald-50 hover:bg-emerald-100 text-[10px] py-1 font-bold text-emerald-950 flex items-center justify-center gap-1"
+                        onClick={() => handleLoadPreset(MAP_BATTLEGROUND)}
+                        className={`paper-btn text-[10px] py-1 font-bold flex items-center justify-center gap-1 cursor-pointer ${
+                          mapName === MAP_BATTLEGROUND.name ? 'bg-rose-300 text-slate-950 font-black' : 'bg-rose-50 hover:bg-rose-100 text-rose-950'
+                        }`}
+                        title="Load Circuit 4: Battleground (Only Circle Rooms, No Finish Line, Random Floor Weapons)"
                       >
-                        <Plus className="w-3 h-3" /> Normal Track
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddCorridor(undefined, undefined, 70, 160, true, 'up')}
-                        className="paper-btn bg-sky-50 hover:bg-sky-100 text-[10px] py-1 font-bold text-sky-950 flex items-center justify-center gap-1"
-                      >
-                        <Plus className="w-3 h-3" /> Moving Wall
-                      </button>
-                    </div>
-
-                    <span className="text-[9px] font-bold text-slate-500 uppercase block pt-1">Barriers (Horizontal & Vertical):</span>
-                    <div className="grid grid-cols-2 gap-1">
-                      <button
-                        type="button"
-                        onClick={() => handleAddBarrier(undefined, undefined, 60, 16, 'static')}
-                        className="paper-btn bg-slate-100 hover:bg-slate-200 text-[10px] py-1 font-bold text-slate-800 flex items-center justify-center gap-1"
-                      >
-                        <Shield className="w-3 h-3" /> Static Bar (H) ↔
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddBarrier(undefined, undefined, 16, 60, 'static')}
-                        className="paper-btn bg-slate-100 hover:bg-slate-200 text-[10px] py-1 font-bold text-slate-800 flex items-center justify-center gap-1"
-                      >
-                        <Shield className="w-3 h-3" /> Static Bar (V) ↕
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddBarrier(undefined, undefined, 60, 16, 'horizontal')}
-                        className="paper-btn bg-amber-50 hover:bg-amber-100 text-[10px] py-1 font-bold text-amber-950 flex items-center justify-center gap-1"
-                      >
-                        <Move className="w-3 h-3" /> Moving Bar (H) ↔
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddBarrier(undefined, undefined, 16, 60, 'vertical')}
-                        className="paper-btn bg-amber-50 hover:bg-amber-100 text-[10px] py-1 font-bold text-amber-950 flex items-center justify-center gap-1"
-                      >
-                        <Move className="w-3 h-3" /> Moving Bar (V) ↕
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddBarrier(undefined, undefined, 45, 16, 'diagonal_up')}
-                        className="paper-btn bg-amber-50 hover:bg-amber-100 text-[10px] py-1 font-bold text-amber-950 flex items-center justify-center gap-1 col-span-2"
-                      >
-                        <Move className="w-3 h-3" /> Diagonal Barrier ↗
-                      </button>
-                    </div>
-
-                    <span className="text-[9px] font-bold text-slate-500 uppercase block pt-1">Gates (H & V) & Pickups:</span>
-                    <div className="grid grid-cols-2 gap-1">
-                      <button
-                        type="button"
-                        onClick={() => handleAddGate(undefined, undefined, 70, 14, 'H')}
-                        className="paper-btn bg-purple-50 hover:bg-purple-100 text-[10px] py-1 font-bold text-purple-950 flex items-center justify-center gap-1"
-                      >
-                        <Plus className="w-3 h-3" /> Gate (H) ↔
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddGate(undefined, undefined, 14, 70, 'V')}
-                        className="paper-btn bg-purple-50 hover:bg-purple-100 text-[10px] py-1 font-bold text-purple-950 flex items-center justify-center gap-1"
-                      >
-                        <Plus className="w-3 h-3" /> Gate (V) ↕
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddPickup('cherry_clone')}
-                        className="paper-btn bg-rose-50 hover:bg-rose-100 text-[10px] py-1 font-bold text-rose-950 flex items-center justify-center gap-1"
-                      >
-                        🍒 +Cherry
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleAddPickup('star_dash')}
-                        className="paper-btn bg-yellow-50 hover:bg-yellow-100 text-[10px] py-1 font-bold text-yellow-950 flex items-center justify-center gap-1"
-                      >
-                        ⭐ +Star Dash
+                        <Swords className="w-3 h-3 shrink-0" />
+                        <span>4. Battleground</span>
                       </button>
                     </div>
                   </div>
@@ -2950,7 +2901,11 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                                 <Icon className="w-3.5 h-3.5" />
                                 {opt.title}
                               </span>
-                              {isSelected && <span className="text-[10px] font-bold">✓ Active</span>}
+                              {isSelected && (
+                                <span className="text-[10px] font-bold flex items-center gap-0.5">
+                                  <Check className="w-3 h-3 stroke-[3]" /> Active
+                                </span>
+                              )}
                             </div>
                             <span className={`text-[10px] leading-tight block ${isSelected ? 'text-sky-100' : 'text-slate-500'}`}>
                               {opt.desc}
@@ -3031,7 +2986,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         options={[
                           {
                             value: 'leader',
-                            label: '🏆 Race Leader',
+                            label: 'Race Leader',
+                            icon: <Trophy className="w-3.5 h-3.5 text-amber-600" />,
                             badge: 'AUTO',
                             subtitle: 'Automatically tracks 1st place racer',
                           },
@@ -3213,9 +3169,9 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                               style={{
                                 transform: `translate(${Math.round((layoutConfig.timerOffsetX ?? 0) * 0.15)}px, ${Math.round((layoutConfig.timerOffsetY ?? 0) * 0.15)}px) scale(${(layoutConfig.timerScale ?? 100) / 100})`,
                               }}
-                              className="bg-slate-800 text-white px-1 rounded font-mono inline-block"
+                              className="bg-slate-800 text-white px-1 rounded font-mono inline-flex items-center gap-0.5"
                             >
-                              ⏱ 00:12
+                              <Clock className="w-2.5 h-2.5" /> 00:12
                             </span>
                           )}
                         </div>
@@ -3245,9 +3201,9 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                               style={{
                                 transform: `translate(${Math.round((layoutConfig.timerOffsetX ?? 0) * 0.15)}px, ${Math.round((layoutConfig.timerOffsetY ?? 0) * 0.15)}px) scale(${(layoutConfig.timerScale ?? 100) / 100})`,
                               }}
-                              className="bg-slate-800 text-white px-1 rounded font-mono inline-block"
+                              className="bg-slate-800 text-white px-1 rounded font-mono inline-flex items-center gap-0.5"
                             >
-                              ⏱ 00:12
+                              <Clock className="w-2.5 h-2.5" /> 00:12
                             </span>
                           )}
                         </div>
@@ -3835,8 +3791,54 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         className="paper-btn w-full bg-sky-300 hover:bg-sky-200 text-slate-950 text-[11px] py-1.5 font-black flex items-center justify-center gap-1.5 shadow-xs cursor-pointer"
                       >
                         <MapPin className="w-3.5 h-3.5" />
-                        <span>🏁 Place Racer Spawns in Corridor #{selectedCorridorIdx + 1}</span>
+                        <Flag className="w-3.5 h-3.5" />
+                        <span>Place Racer Spawns in Corridor #{selectedCorridorIdx + 1}</span>
                       </button>
+                    </div>
+
+                    {/* Room Geometry Shape: Rectangle vs Circle Room */}
+                    <div className="border-t border-amber-200 pt-1.5">
+                      <span className="block text-slate-700 font-extrabold mb-1">Room Geometry Shape:</span>
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            pushSnapshot();
+                            setCorridors(prev => {
+                              const u = [...prev];
+                              u[selectedCorridorIdx] = { ...u[selectedCorridorIdx], shape: 'rect' };
+                              return u;
+                            });
+                          }}
+                          className={`paper-btn text-xs py-1 font-bold flex items-center justify-center gap-1 ${
+                            corridors[selectedCorridorIdx].shape !== 'circle' ? 'bg-amber-300 text-slate-950' : 'bg-white text-slate-700'
+                          }`}
+                        >
+                          <Square className="w-3 h-3" />
+                          <span>Rectangle Hall</span>
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            pushSnapshot();
+                            setCorridors(prev => {
+                              const u = [...prev];
+                              u[selectedCorridorIdx] = {
+                                ...u[selectedCorridorIdx],
+                                shape: 'circle',
+                                hasMovingWall: false,
+                              };
+                              return u;
+                            });
+                          }}
+                          className={`paper-btn text-xs py-1 font-bold flex items-center justify-center gap-1 ${
+                            corridors[selectedCorridorIdx].shape === 'circle' ? 'bg-teal-400 text-slate-950' : 'bg-white text-slate-700'
+                          }`}
+                        >
+                          <Circle className="w-3 h-3" />
+                          <span>Circle Room</span>
+                        </button>
+                      </div>
                     </div>
 
                     {/* Corridor Type: Normal vs Moving Wall */}
@@ -3865,6 +3867,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                               const u = [...prev];
                               u[selectedCorridorIdx] = {
                                 ...u[selectedCorridorIdx],
+                                shape: 'rect',
                                 hasMovingWall: true,
                                 wallDirection: u[selectedCorridorIdx].wallDirection || 'right',
                                 wallSpeed: u[selectedCorridorIdx].wallSpeed || 55,
@@ -4092,13 +4095,14 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                                 return u;
                               });
                             }}
-                            className={`paper-btn text-[10px] py-1 font-black ${
+                            className={`paper-btn text-[10px] py-1 font-black flex items-center justify-center gap-1 ${
                               gates[selectedGateIdx].orientation !== 'V' && gates[selectedGateIdx].w >= gates[selectedGateIdx].h
                                 ? '!bg-purple-500 !text-white'
                                 : '!bg-white !text-slate-800'
                             }`}
                           >
-                            ↔ Horizontal Gate
+                            <ArrowLeftRight className="w-3 h-3" />
+                            <span>Horizontal Gate</span>
                           </button>
                           <button
                             type="button"
@@ -4118,13 +4122,14 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                                 return u;
                               });
                             }}
-                            className={`paper-btn text-[10px] py-1 font-black ${
+                            className={`paper-btn text-[10px] py-1 font-black flex items-center justify-center gap-1 ${
                               gates[selectedGateIdx].orientation === 'V' || gates[selectedGateIdx].h > gates[selectedGateIdx].w
                                 ? '!bg-purple-500 !text-white'
                                 : '!bg-white !text-slate-800'
                             }`}
                           >
-                            ↕ Vertical Gate
+                            <ArrowUpDown className="w-3 h-3" />
+                            <span>Vertical Gate</span>
                           </button>
                         </div>
                       </div>
@@ -4221,7 +4226,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                             },
                             ...teamList.map(t => ({
                               value: t.id,
-                              label: `🔑 ${t.name} Keyholder`,
+                              label: `${t.name} Keyholder`,
+                              icon: <Key className="w-3 h-3 text-amber-600" />,
                               colorSwatch: t.css,
                               badge: 'INSTANT',
                             })),
@@ -4405,13 +4411,14 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                               return u;
                             });
                           }}
-                          className={`paper-btn text-[10px] py-1 font-black ${
+                          className={`paper-btn text-[10px] py-1 font-black flex items-center justify-center gap-1 ${
                             barriers[selectedBarrierIdx].w >= barriers[selectedBarrierIdx].h
                               ? '!bg-amber-400 !text-slate-950'
                               : '!bg-white !text-slate-800'
                           }`}
                         >
-                          ↔ Horizontal Bar
+                          <ArrowLeftRight className="w-3 h-3" />
+                          <span>Horizontal Bar</span>
                         </button>
                         <button
                           type="button"
@@ -4430,13 +4437,14 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                               return u;
                             });
                           }}
-                          className={`paper-btn text-[10px] py-1 font-black ${
+                          className={`paper-btn text-[10px] py-1 font-black flex items-center justify-center gap-1 ${
                             barriers[selectedBarrierIdx].h > barriers[selectedBarrierIdx].w
                               ? '!bg-amber-400 !text-slate-950'
                               : '!bg-white !text-slate-800'
                           }`}
                         >
-                          ↕ Vertical Bar
+                          <ArrowUpDown className="w-3 h-3" />
+                          <span>Vertical Bar</span>
                         </button>
                       </div>
                     </div>
@@ -4446,11 +4454,11 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                       <span className="block text-slate-700 font-extrabold text-[11px] mb-1">Movement Trajectory:</span>
                       <div className="grid grid-cols-2 gap-1">
                         {[
-                          { id: 'static', label: 'Static (Still)' },
-                          { id: 'horizontal', label: '↔ Horizontal' },
-                          { id: 'vertical', label: '↕ Vertical' },
-                          { id: 'diagonal_up', label: '↗ Diagonal Up' },
-                          { id: 'diagonal_down', label: '↘ Diagonal Down' }
+                          { id: 'static', label: 'Static (Still)', icon: <Square className="w-3 h-3" /> },
+                          { id: 'horizontal', label: 'Horizontal', icon: <ArrowLeftRight className="w-3 h-3" /> },
+                          { id: 'vertical', label: 'Vertical', icon: <ArrowUpDown className="w-3 h-3" /> },
+                          { id: 'diagonal_up', label: 'Diagonal Up', icon: <ArrowUpRight className="w-3 h-3" /> },
+                          { id: 'diagonal_down', label: 'Diagonal Down', icon: <ArrowDownRight className="w-3 h-3" /> }
                         ].map((m) => {
                           const isCur = barriers[selectedBarrierIdx].movement === m.id;
                           return (
@@ -4464,11 +4472,12 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                                   return u;
                                 });
                               }}
-                              className={`paper-btn text-[10px] py-1 font-bold ${
+                              className={`paper-btn text-[10px] py-1 font-bold flex items-center justify-center gap-1 ${
                                 isCur ? '!bg-amber-400 !text-slate-950' : '!bg-white !text-slate-800 hover:!bg-slate-100'
                               }`}
                             >
-                              {m.label}
+                              {m.icon}
+                              <span>{m.label}</span>
                             </button>
                           );
                         })}
@@ -4610,9 +4619,10 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                               rotation: ((prev.rotation || 0) + 90) % 360,
                             }));
                           }}
-                          className="paper-btn bg-emerald-300 hover:bg-emerald-200 text-slate-950 text-[10px] px-2 py-0.5 font-black cursor-pointer"
+                          className="paper-btn bg-emerald-300 hover:bg-emerald-200 text-slate-950 text-[10px] px-2 py-0.5 font-black flex items-center gap-1 cursor-pointer"
                         >
-                          Rotate +90° ↻
+                          <RotateCw className="w-3 h-3" />
+                          <span>Rotate +90°</span>
                         </button>
                       </div>
                       <div className="grid grid-cols-4 gap-1">
@@ -4724,10 +4734,15 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         <PaperDropdown
                           value={pickups[selectedPickupIdx].type}
                           options={[
-                            { value: 'cherry_clone', label: '🍒 Cherry Clone', badge: 'x2 CLONE', subtitle: 'Duplicates racer on contact' },
-                            { value: 'star_dash', label: '⭐ Star Dash', badge: '1.5x SPD', subtitle: 'High-speed turbo boost' },
-                            { value: 'shield', label: '🛡️ Shield Bubble', badge: 'ARMOR', subtitle: 'Blocks one knife attack' },
-                            { value: 'knife', label: '🔪 Knife Blade', badge: 'WEAPON', subtitle: 'Eliminates rival racer on contact' },
+                            { value: 'uzi', label: 'Uzi Submachine Gun', icon: <Crosshair className="w-3.5 h-3.5 text-amber-600" />, badge: 'RAPID SMG', subtitle: 'Fast fire rate · 16 rounds · 1.4 DMG' },
+                            { value: 'ump', label: 'UMP Tactical SMG', icon: <Crosshair className="w-3.5 h-3.5 text-amber-700" />, badge: 'BURST SMG', subtitle: 'Steady recoil · 12 rounds · 2.1 DMG' },
+                            { value: 'ak', label: 'AK-47 Assault Rifle', icon: <Crosshair className="w-3.5 h-3.5 text-orange-600" />, badge: 'HEAVY AR', subtitle: 'High impact · 10 rounds · 3.3 DMG' },
+                            { value: 'mini14', label: 'Mini 14 Marksman', icon: <Crosshair className="w-3.5 h-3.5 text-emerald-700" />, badge: 'SNIPER DMR', subtitle: 'Long range · 7 rounds · 5.1 DMG' },
+                            { value: 'scar', label: 'SCAR-L Combat Rifle', icon: <Crosshair className="w-3.5 h-3.5 text-yellow-700" />, badge: 'PRECISION AR', subtitle: 'Balanced rifle · 10 rounds · 3.6 DMG' },
+                            { value: 'knife', label: 'Knife Blade', icon: <Sword className="w-3.5 h-3.5 text-slate-700" />, badge: 'MELEE', subtitle: 'Deals 55 HP slash damage on contact' },
+                            { value: 'shield', label: 'Shield Bubble', icon: <Shield className="w-3.5 h-3.5 text-sky-600" />, badge: 'ARMOR', subtitle: 'Blocks incoming bullet or knife attack' },
+                            { value: 'star_dash', label: 'Star Dash', icon: <Star className="w-3.5 h-3.5 text-amber-500" />, badge: '1.5x SPD', subtitle: 'High-speed turbo boost' },
+                            { value: 'cherry_clone', label: 'Cherry Clone', icon: <Copy className="w-3.5 h-3.5 text-rose-600" />, badge: 'x2 CLONE', subtitle: 'Duplicates racer on contact' },
                           ]}
                           onChange={(val) => {
                             pushSnapshot();
@@ -4778,7 +4793,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                   <div className="paper-card bg-sky-50 p-2 text-xs space-y-2.5 border-2 border-sky-900">
                     <div className="flex items-center justify-between font-black text-sky-950">
                       <span className="flex items-center gap-1">
-                        🏁 Racer Spawn Setup
+                        <Flag className="w-3.5 h-3.5 text-sky-700" />
+                        <span>Racer Spawn Setup</span>
                       </span>
                       <button
                         type="button"
@@ -4893,19 +4909,20 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                                 </span>
                                 <div className="grid grid-cols-5 gap-1">
                                   {([
-                                    { id: 'up', label: '↑ Up' },
-                                    { id: 'down', label: '↓ Down' },
-                                    { id: 'left', label: '← Left' },
-                                    { id: 'right', label: '→ Right' },
-                                    { id: 'scatter', label: '🎲 Diag' },
+                                    { id: 'up', label: 'Up', icon: <ArrowUp className="w-3 h-3" /> },
+                                    { id: 'down', label: 'Down', icon: <ArrowDown className="w-3 h-3" /> },
+                                    { id: 'left', label: 'Left', icon: <ArrowLeft className="w-3 h-3" /> },
+                                    { id: 'right', label: 'Right', icon: <ArrowRight className="w-3 h-3" /> },
+                                    { id: 'scatter', label: 'Diag', icon: <Shuffle className="w-3 h-3" /> },
                                   ] as const).map(d => (
                                     <button
                                       key={d.id}
                                       type="button"
                                       onClick={() => handleSetSpawnVelocities(d.id, selectedSpawnIdx)}
-                                      className="paper-btn bg-slate-100 hover:bg-sky-200 text-[9px] py-1 font-black text-slate-900"
+                                      className="paper-btn bg-slate-100 hover:bg-sky-200 text-[9px] py-1 font-black text-slate-900 flex items-center justify-center gap-0.5"
                                     >
-                                      {d.label}
+                                      {d.icon}
+                                      <span>{d.label}</span>
                                     </button>
                                   ))}
                                 </div>
@@ -4927,7 +4944,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                             onClick={handleAutoFitStartingBays}
                             className="paper-btn w-full bg-emerald-300 hover:bg-emerald-200 text-slate-950 text-[10px] py-1.5 font-black flex items-center justify-center gap-1 shadow-xs cursor-pointer"
                           >
-                            ⚡ Auto-Fit into Starting Bays (Order 1)
+                            <Zap className="w-3.5 h-3.5" />
+                            <span>Auto-Fit into Starting Bays (Order 1)</span>
                           </button>
                           <div className="flex items-center gap-1.5 pt-0.5">
                             <span className="text-[10px] font-bold text-slate-600 shrink-0">Or Fit in:</span>
@@ -4959,47 +4977,53 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                             <button
                               type="button"
                               onClick={() => handleApplySpawnFormation('grid_2x4')}
-                              className="paper-btn bg-slate-100 hover:bg-sky-200 text-[10px] py-1 font-bold text-slate-900"
+                              className="paper-btn bg-slate-100 hover:bg-sky-200 text-[10px] py-1 font-bold text-slate-900 flex items-center justify-center gap-1"
                             >
-                              ⊞ 2×4 Grid
+                              <Grid className="w-3 h-3" />
+                              <span>2×4 Grid</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handleApplySpawnFormation('grid_4x2')}
-                              className="paper-btn bg-slate-100 hover:bg-sky-200 text-[10px] py-1 font-bold text-slate-900"
+                              className="paper-btn bg-slate-100 hover:bg-sky-200 text-[10px] py-1 font-bold text-slate-900 flex items-center justify-center gap-1"
                             >
-                              ⊟ 4×2 Grid
+                              <Grid className="w-3 h-3" />
+                              <span>4×2 Grid</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handleApplySpawnFormation('circle')}
-                              className="paper-btn bg-slate-100 hover:bg-sky-200 text-[10px] py-1 font-bold text-slate-900"
+                              className="paper-btn bg-slate-100 hover:bg-sky-200 text-[10px] py-1 font-bold text-slate-900 flex items-center justify-center gap-1"
                             >
-                              ◎ Circle
+                              <Circle className="w-3 h-3" />
+                              <span>Circle</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handleApplySpawnFormation('line_h')}
-                              className="paper-btn bg-slate-100 hover:bg-sky-200 text-[10px] py-1 font-bold text-slate-900"
+                              className="paper-btn bg-slate-100 hover:bg-sky-200 text-[10px] py-1 font-bold text-slate-900 flex items-center justify-center gap-1"
                             >
-                              ↔ H-Line
+                              <ArrowLeftRight className="w-3 h-3" />
+                              <span>H-Line</span>
                             </button>
                             <button
                               type="button"
                               onClick={() => handleApplySpawnFormation('line_v')}
-                              className="paper-btn bg-slate-100 hover:bg-sky-200 text-[10px] py-1 font-bold text-slate-900"
+                              className="paper-btn bg-slate-100 hover:bg-sky-200 text-[10px] py-1 font-bold text-slate-900 flex items-center justify-center gap-1"
                             >
-                              ↕ V-Line
+                              <ArrowUpDown className="w-3 h-3" />
+                              <span>V-Line</span>
                             </button>
                             <button
                               type="button"
-                              onClick={() => setEditorMode('spawn')}
-                              className={`paper-btn text-[10px] py-1 font-black ${
+                              onClick={() => setEditorMode(editorMode === 'spawn' ? 'select' : 'spawn')}
+                              className={`paper-btn text-[10px] py-1 font-black flex items-center justify-center gap-1 ${
                                 editorMode === 'spawn' ? '!bg-sky-400 !text-slate-950' : 'bg-amber-100 hover:bg-amber-200 text-amber-950'
                               }`}
                               title="Click anywhere on the map to move spawns there"
                             >
-                              📍 Click Map
+                              <MapPin className="w-3 h-3" />
+                              <span>Click Map</span>
                             </button>
                           </div>
                         </div>
@@ -5052,19 +5076,20 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                           </span>
                           <div className="grid grid-cols-5 gap-1">
                             {([
-                              { id: 'up', label: '↑ Up' },
-                              { id: 'down', label: '↓ Down' },
-                              { id: 'left', label: '← Left' },
-                              { id: 'right', label: '→ Right' },
-                              { id: 'scatter', label: '🎲 Scatter' },
+                              { id: 'up', label: 'Up', icon: <ArrowUp className="w-3 h-3" /> },
+                              { id: 'down', label: 'Down', icon: <ArrowDown className="w-3 h-3" /> },
+                              { id: 'left', label: 'Left', icon: <ArrowLeft className="w-3 h-3" /> },
+                              { id: 'right', label: 'Right', icon: <ArrowRight className="w-3 h-3" /> },
+                              { id: 'scatter', label: 'Scatter', icon: <Shuffle className="w-3 h-3" /> },
                             ] as const).map(d => (
                               <button
                                 key={d.id}
                                 type="button"
                                 onClick={() => handleSetSpawnVelocities(d.id, null)}
-                                className="paper-btn bg-slate-100 hover:bg-sky-200 text-[9px] py-1 font-black text-slate-900"
+                                className="paper-btn bg-slate-100 hover:bg-sky-200 text-[9px] py-1 font-black text-slate-900 flex items-center justify-center gap-0.5"
                               >
-                                {d.label}
+                                {d.icon}
+                                <span>{d.label}</span>
                               </button>
                             ))}
                           </div>
@@ -5075,7 +5100,187 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                 </div>
               ) : (
                 /* VIEW F: NOTHING SELECTED -> SHOW ALL OBJECTS LIST */
-                <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+                <div className="flex-1 overflow-y-auto space-y-2.5 pr-1">
+                  {/* Track Mode & Battler Settings Card */}
+                  <div className="paper-card bg-rose-50/90 p-2 border-2 border-slate-900 text-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-black uppercase text-slate-900">
+                        Track Game Mode
+                      </span>
+                      <span className="text-[9px] font-black px-1.5 py-0.5 rounded border border-slate-900 bg-white text-slate-900 flex items-center gap-1">
+                        {trackType === 'battler' ? (
+                          <>
+                            <Swords className="w-2.5 h-2.5 text-rose-600" />
+                            <span>BATTLER SURVIVAL</span>
+                          </>
+                        ) : (
+                          <>
+                            <Flag className="w-2.5 h-2.5 text-emerald-700" />
+                            <span>CLASSIC RACE</span>
+                          </>
+                        )}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-1">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          pushSnapshot();
+                          setTrackType('races');
+                          setHideFinishZone(false);
+                        }}
+                        className={`paper-btn text-[10px] py-1 font-black flex items-center justify-center gap-1 cursor-pointer ${
+                          trackType === 'races'
+                            ? '!bg-emerald-400 !text-slate-950'
+                            : 'bg-white text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <Flag className="w-3 h-3" />
+                        <span>Races (Finish Line)</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          pushSnapshot();
+                          setTrackType('battler');
+                          setHideFinishZone(true);
+                          setWallTriggerMode('off');
+                        }}
+                        className={`paper-btn text-[10px] py-1 font-black flex items-center justify-center gap-1 cursor-pointer ${
+                          trackType === 'battler'
+                            ? '!bg-rose-500 !text-white'
+                            : 'bg-white text-slate-700 hover:bg-slate-100'
+                        }`}
+                      >
+                        <Swords className="w-3 h-3" />
+                        <span>Battler (Last Alive)</span>
+                      </button>
+                    </div>
+
+                    {trackType === 'battler' && (
+                      <div className="bg-white/95 p-2 rounded border border-rose-300 space-y-2">
+                        <div>
+                          <span className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">
+                            Battler Sub-Mode:
+                          </span>
+                          <div className="grid grid-cols-3 gap-1">
+                            {([
+                              { id: 'ffa', label: 'Free-For-All', icon: <Swords className="w-2.5 h-2.5" /> },
+                              { id: 'team_battle', label: 'Team A vs B', icon: <Shield className="w-2.5 h-2.5" /> },
+                              { id: 'boss_fight', label: 'Team vs Boss', icon: <Crown className="w-2.5 h-2.5" /> },
+                            ] as { id: BattlerSubMode; label: string; icon: React.ReactNode }[]).map((sm) => (
+                              <button
+                                key={sm.id}
+                                type="button"
+                                onClick={() => {
+                                  pushSnapshot();
+                                  setBattlerConfig(prev => ({ ...prev, subMode: sm.id }));
+                                }}
+                                className={`paper-btn text-[9px] py-1 font-black flex items-center justify-center gap-0.5 cursor-pointer ${
+                                  battlerConfig.subMode === sm.id
+                                    ? '!bg-slate-900 !text-white'
+                                    : 'bg-slate-100 text-slate-800 hover:bg-slate-200'
+                                }`}
+                              >
+                                {sm.icon}
+                                <span>{sm.label}</span>
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+
+                        {battlerConfig.subMode === 'boss_fight' && (
+                          <div className="grid grid-cols-2 gap-1.5 pt-1 border-t border-slate-100">
+                            <div>
+                              <span className="block text-[9px] font-black text-slate-700 uppercase mb-0.5">
+                                Boss Racer
+                              </span>
+                              <PaperDropdown
+                                compact
+                                value={battlerConfig.bossTeamId || 'red'}
+                                options={teamList.map(t => ({
+                                  value: t.id,
+                                  label: t.name,
+                                  icon: <Crown className="w-3 h-3 text-amber-600" />,
+                                  colorSwatch: t.css,
+                                }))}
+                                onChange={(val) =>
+                                  setBattlerConfig(prev => ({ ...prev, bossTeamId: val }))
+                                }
+                              />
+                            </div>
+                            <NumberStepper
+                              label="Boss HP Mult"
+                              unit="x"
+                              value={battlerConfig.bossHpMultiplier || 5}
+                              min={2}
+                              max={20}
+                              step={1}
+                              onChange={(val) =>
+                                setBattlerConfig(prev => ({ ...prev, bossHpMultiplier: val }))
+                              }
+                            />
+                          </div>
+                        )}
+
+                        <div className="flex items-center justify-between pt-1 border-t border-slate-100">
+                          <label className="flex items-center gap-1.5 cursor-pointer select-none">
+                            <input
+                              type="checkbox"
+                              checked={battlerConfig.randomWeaponSpawn !== false}
+                              onChange={(e) =>
+                                setBattlerConfig(prev => ({
+                                  ...prev,
+                                  randomWeaponSpawn: e.target.checked,
+                                }))
+                              }
+                              className="w-3.5 h-3.5 accent-rose-600 rounded cursor-pointer"
+                            />
+                            <span className="text-[10px] font-extrabold text-slate-800 flex items-center gap-1">
+                              <Crosshair className="w-3 h-3 text-rose-600" />
+                              <span>Random Floor Weapon Spawner</span>
+                            </span>
+                          </label>
+                        </div>
+
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <NumberStepper
+                            label="Default HP"
+                            value={battlerConfig.defaultHp || 100}
+                            min={20}
+                            max={1000}
+                            step={10}
+                            onChange={(val) =>
+                              setBattlerConfig(prev => ({ ...prev, defaultHp: val }))
+                            }
+                          />
+                          <NumberStepper
+                            label="Spawn Interval"
+                            unit="s"
+                            value={battlerConfig.weaponSpawnInterval || 3.5}
+                            min={1}
+                            max={20}
+                            step={0.5}
+                            onChange={(val) =>
+                              setBattlerConfig(prev => ({ ...prev, weaponSpawnInterval: val }))
+                            }
+                          />
+                          <NumberStepper
+                            label="Max Floor Guns"
+                            value={battlerConfig.maxFloorWeapons || 7}
+                            min={1}
+                            max={25}
+                            step={1}
+                            onChange={(val) =>
+                              setBattlerConfig(prev => ({ ...prev, maxFloorWeapons: val }))
+                            }
+                          />
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Racer Spawn Zone quick card */}
                   <div
                     onClick={() => {
@@ -5085,7 +5290,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                     className="paper-card bg-sky-50 hover:bg-sky-100 p-1.5 border-2 border-sky-800 flex items-center justify-between cursor-pointer"
                   >
                     <div className="flex items-center gap-1.5">
-                      <span className="text-xs">🏁</span>
+                      <Flag className="w-3.5 h-3.5 text-sky-700" />
                       <span className="font-extrabold text-[11px] text-sky-950">Racer Spawn Zone</span>
                     </div>
                     <div className="flex items-center gap-1.5">
@@ -5106,22 +5311,24 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                     </div>
                   </div>
 
-                  {/* Finish Zone Alcove quick card */}
-                  <div
-                    onClick={() => {
-                      clearSelection();
-                      setIsFinishSelected(true);
-                    }}
-                    className="paper-card bg-emerald-50 hover:bg-emerald-100 p-1.5 border-2 border-emerald-800 flex items-center justify-between cursor-pointer"
-                  >
-                    <div className="flex items-center gap-1.5">
-                      <Flag className="w-3.5 h-3.5 text-emerald-700" />
-                      <span className="font-extrabold text-[11px] text-emerald-950">Finish Line Alcove</span>
+                  {/* Finish Zone Alcove quick card (Shown in Races mode) */}
+                  {trackType !== 'battler' && !hideFinishZone && (
+                    <div
+                      onClick={() => {
+                        clearSelection();
+                        setIsFinishSelected(true);
+                      }}
+                      className="paper-card bg-emerald-50 hover:bg-emerald-100 p-1.5 border-2 border-emerald-800 flex items-center justify-between cursor-pointer"
+                    >
+                      <div className="flex items-center gap-1.5">
+                        <Flag className="w-3.5 h-3.5 text-emerald-700" />
+                        <span className="font-extrabold text-[11px] text-emerald-950">Finish Line Alcove</span>
+                      </div>
+                      <span className="text-[10px] font-mono text-emerald-800 font-bold">
+                        {finishZone.x},{finishZone.y} ({finishZone.w}×{finishZone.h})
+                      </span>
                     </div>
-                    <span className="text-[10px] font-mono text-emerald-800 font-bold">
-                      {finishZone.x},{finishZone.y} ({finishZone.w}×{finishZone.h})
-                    </span>
-                  </div>
+                  )}
 
                   {/* Global Moving Wall Trigger Strategy Box */}
                   <div className="paper-card bg-amber-50 p-2 border-2 border-amber-900 text-xs space-y-2">
@@ -5131,7 +5338,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         Wall Trigger Condition
                       </span>
                     </div>
-                    <div className="grid grid-cols-3 gap-1">
+                    <div className="grid grid-cols-4 gap-1">
                       <button
                         type="button"
                         onClick={() => setWallTriggerMode('gate_destroy')}
@@ -5162,6 +5369,16 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                       >
                         Timed
                       </button>
+                      <button
+                        type="button"
+                        onClick={() => setWallTriggerMode('off')}
+                        className={`paper-btn text-[10px] py-1 font-bold ${
+                          wallTriggerMode === 'off' ? 'bg-slate-800 !text-white' : 'bg-white text-slate-700'
+                        }`}
+                        title="Disable moving walls (e.g. Battleground mode)"
+                      >
+                        Off
+                      </button>
                     </div>
 
                     {wallTriggerMode === 'timer' && (
@@ -5180,13 +5397,19 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
 
                     {wallTriggerMode === 'gate_destroy' && (
                       <span className="block text-[9px] text-amber-900 font-medium">
-                        Wall starts when any gate with 🔥 trigger is shattered.
+                        Wall starts when any gate with Trigger enabled is shattered.
                       </span>
                     )}
 
                     {wallTriggerMode === 'immediate' && (
                       <span className="block text-[9px] text-emerald-900 font-medium">
                         Wall moves right away when simulation starts.
+                      </span>
+                    )}
+
+                    {wallTriggerMode === 'off' && (
+                      <span className="block text-[9px] text-slate-600 font-medium">
+                        Moving walls are disabled for this arena.
                       </span>
                     )}
                   </div>
@@ -5199,7 +5422,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                   <div className="space-y-1">
                     <div className="flex items-center justify-between text-[11px] font-black text-slate-800 uppercase">
                       <span className="flex items-center gap-1">
-                        <Layers className="w-3 h-3" /> Corridors ({corridors.length})
+                        <Layers className="w-3 h-3" /> Rooms & Corridors ({corridors.length})
                       </span>
                     </div>
                     <div className="space-y-1 max-h-36 overflow-y-auto pr-0.5">
@@ -5213,13 +5436,17 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                           >
                             <div className="flex items-center gap-1.5">
                               <span className="font-extrabold text-slate-900">#{idx + 1}</span>
-                              {c.hasMovingWall ? (
+                              {c.shape === 'circle' ? (
+                                <span className="bg-teal-100 text-teal-900 border border-teal-300 px-1 rounded text-[9px] font-black flex items-center gap-0.5">
+                                  <Circle className="w-2.5 h-2.5" /> CIRCLE ROOM
+                                </span>
+                              ) : c.hasMovingWall ? (
                                 <span className="bg-sky-100 text-sky-900 border border-sky-300 px-1 rounded text-[9px] font-black">
                                   ORDER {orderNum} · {c.wallDirection?.toUpperCase()}
                                 </span>
                               ) : (
                                 <span className="bg-slate-100 text-slate-600 px-1 rounded text-[9px] font-bold">
-                                  Normal
+                                  Normal Hall
                                 </span>
                               )}
                             </div>
@@ -5261,8 +5488,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                               />
                               <span className="font-bold text-slate-900">Gate #{idx + 1}</span>
                               {keyTeam && (
-                                <span className="bg-amber-100 text-amber-900 border border-amber-300 px-1 rounded text-[9px] font-black">
-                                  🔑 {keyTeam.name}
+                                <span className="bg-amber-100 text-amber-900 border border-amber-300 px-1 rounded text-[9px] font-black flex items-center gap-0.5">
+                                  <Key className="w-2.5 h-2.5 text-amber-600" /> {keyTeam.name}
                                 </span>
                               )}
                               {g.triggersFlood && (
@@ -5298,7 +5525,7 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                               {b.movement.toUpperCase()}
                             </span>
                           </div>
-                          <span className="text-[10px] font-mono text-slate-500">
+                          <span className="text-[10px] text-slate-500 font-mono">
                             {b.w}×{b.h}
                           </span>
                         </div>
@@ -5338,66 +5565,60 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                 </>
               )}
 
-              {/* Bottom Quick Palette Buttons */}
-              <div className="mt-auto pt-2 border-t border-slate-300 flex flex-col gap-1.5 shrink-0">
-                <span className="text-[10px] font-black uppercase text-slate-600">Quick Stamp (Placed at View Center):</span>
-                <div className="grid grid-cols-4 gap-1">
-                  <button
-                    type="button"
-                    onClick={() => handleAddCorridor(undefined, undefined, 90, 60, false)}
-                    className="paper-btn bg-emerald-100 hover:bg-emerald-200 text-[10px] py-1 font-bold text-slate-900"
-                  >
-                    + Hall
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAddCorridor(undefined, undefined, 70, 200, true, 'up')}
-                    className="paper-btn bg-sky-100 hover:bg-sky-200 text-[10px] py-1 font-bold text-sky-950"
-                  >
-                    + Wall
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAddGate(undefined, undefined, 70, 14, 'H')}
-                    className="paper-btn bg-purple-100 hover:bg-purple-200 text-[10px] py-1 font-bold text-purple-950"
-                  >
-                    + Gate (H)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAddGate(undefined, undefined, 14, 70, 'V')}
-                    className="paper-btn bg-purple-100 hover:bg-purple-200 text-[10px] py-1 font-bold text-purple-950"
-                  >
-                    + Gate (V)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAddBarrier(undefined, undefined, 60, 16, 'horizontal')}
-                    className="paper-btn bg-amber-100 hover:bg-amber-200 text-[10px] py-1 font-bold text-amber-950"
-                  >
-                    + Bar (H)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAddBarrier(undefined, undefined, 16, 60, 'vertical')}
-                    className="paper-btn bg-amber-100 hover:bg-amber-200 text-[10px] py-1 font-bold text-amber-950"
-                  >
-                    + Bar (V)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAddBarrier(undefined, undefined, 16, 55, 'static')}
-                    className="paper-btn bg-slate-200 hover:bg-slate-300 text-[10px] py-1 font-bold text-slate-950"
-                  >
-                    + Static (V)
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => handleAddPickup('cherry_clone')}
-                    className="paper-btn bg-rose-100 hover:bg-rose-200 text-[10px] py-1 font-bold text-rose-950"
-                  >
-                    🍒 +Cherry
-                  </button>
+              {/* Restored Bottom 2-Row Horizontally Scrollable Tool Select Bar (SVG Icons Only) */}
+              <div className="mt-auto pt-2 border-t border-slate-300 flex flex-col gap-1 shrink-0">
+                <div className="flex items-center justify-between">
+                  <span className="text-[10px] font-black uppercase text-slate-700 flex items-center gap-1">
+                    <span>Tool Select (2 Rows)</span>
+                    <ArrowLeftRight className="w-2.5 h-2.5 text-slate-500" />
+                  </span>
+                  <span className="text-[9px] font-bold text-slate-500">
+                    Active: <strong className="text-slate-900 uppercase">{editorMode.replace('_', ' ')}</strong>
+                  </span>
+                </div>
+                <div className="grid grid-rows-2 grid-flow-col auto-cols-max gap-1 overflow-x-auto pb-1 scrollbar-thin">
+                  {([
+                    { mode: 'select', label: 'Select / Drag', icon: <MousePointer className="w-3 h-3" />, bg: 'bg-slate-100 text-slate-900' },
+                    { mode: 'spawn', label: 'Place Spawns', icon: <Flag className="w-3 h-3" />, bg: 'bg-sky-100 text-sky-950' },
+                    { mode: 'draw', label: 'Rect Room', icon: <Square className="w-3 h-3" />, bg: 'bg-emerald-100 text-emerald-950' },
+                    { mode: 'draw_circle', label: 'Circle Room', icon: <Circle className="w-3 h-3" />, bg: 'bg-teal-100 text-teal-950' },
+                    { mode: 'draw_wall', label: 'Moving Wall', icon: <Waves className="w-3 h-3" />, bg: 'bg-sky-100 text-sky-950' },
+                    { mode: 'gate', label: 'Gate (H)', icon: <Shield className="w-3 h-3" />, bg: 'bg-purple-100 text-purple-950' },
+                    { mode: 'gate_v', label: 'Gate (V)', icon: <Shield className="w-3 h-3" />, bg: 'bg-purple-100 text-purple-950' },
+                    { mode: 'barrier', label: 'Bar (H)', icon: <ArrowLeftRight className="w-3 h-3" />, bg: 'bg-amber-100 text-amber-950' },
+                    { mode: 'barrier_v', label: 'Bar (V)', icon: <ArrowUpDown className="w-3 h-3" />, bg: 'bg-amber-100 text-amber-950' },
+                    { mode: 'barrier_static', label: 'Static Bar', icon: <Columns className="w-3 h-3" />, bg: 'bg-slate-200 text-slate-900' },
+                    { mode: 'uzi', label: 'Uzi SMG', icon: <Crosshair className="w-3 h-3" />, bg: 'bg-rose-100 text-rose-950' },
+                    { mode: 'ump', label: 'UMP SMG', icon: <Crosshair className="w-3 h-3" />, bg: 'bg-rose-100 text-rose-950' },
+                    { mode: 'ak', label: 'AK Rifle', icon: <Crosshair className="w-3 h-3" />, bg: 'bg-rose-100 text-rose-950' },
+                    { mode: 'mini14', label: 'Mini 14', icon: <Crosshair className="w-3 h-3" />, bg: 'bg-rose-100 text-rose-950' },
+                    { mode: 'scar', label: 'SCAR-L', icon: <Crosshair className="w-3 h-3" />, bg: 'bg-rose-100 text-rose-950' },
+                    { mode: 'knife', label: 'Knife', icon: <Sword className="w-3 h-3" />, bg: 'bg-rose-100 text-rose-950' },
+                    { mode: 'shield', label: 'Shield', icon: <Shield className="w-3 h-3" />, bg: 'bg-cyan-100 text-cyan-950' },
+                    { mode: 'star_dash', label: 'Star Dash', icon: <Star className="w-3 h-3" />, bg: 'bg-yellow-100 text-yellow-950' },
+                    { mode: 'pickup', label: 'Cherry x2', icon: <Copy className="w-3 h-3" />, bg: 'bg-pink-100 text-pink-950' },
+                    { mode: 'delete', label: 'Delete Click', icon: <Trash2 className="w-3 h-3" />, bg: 'bg-red-100 text-red-950' },
+                  ] as { mode: EditorMode; label: string; icon: React.ReactNode; bg: string }[]).map((tool) => {
+                    const isActive = editorMode === tool.mode;
+                    return (
+                      <button
+                        key={`btm_${tool.mode}`}
+                        type="button"
+                        onClick={() => {
+                          Sound.play('button_click');
+                          setEditorMode(tool.mode);
+                        }}
+                        className={`paper-btn px-2 py-1 text-[10px] font-black whitespace-nowrap flex items-center gap-1 cursor-pointer ${
+                          isActive
+                            ? '!bg-slate-950 !text-white ring-2 ring-amber-400'
+                            : `${tool.bg} hover:brightness-95`
+                        }`}
+                      >
+                        {tool.icon}
+                        <span>{tool.label}</span>
+                      </button>
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -5432,26 +5653,41 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                 <button
                   type="button"
                   onClick={() => setTeamList(prev => prev.map(t => ({ ...t, shape: 'square' })))}
-                  className="paper-btn bg-slate-50 hover:bg-slate-100 text-[10px] px-1.5 py-0.5 font-bold"
+                  className="paper-btn bg-slate-50 hover:bg-slate-100 text-[10px] px-1.5 py-0.5 font-bold flex items-center gap-1"
                   title="Set all racers to Square body"
                 >
-                  All ⬛
+                  <Square className="w-3 h-3 fill-slate-800 text-slate-900" />
+                  <span>All Square</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setTeamList(prev => prev.map(t => ({ ...t, shape: 'rounded' })))}
-                  className="paper-btn bg-slate-50 hover:bg-slate-100 text-[10px] px-1.5 py-0.5 font-bold"
+                  className="paper-btn bg-slate-50 hover:bg-slate-100 text-[10px] px-1.5 py-0.5 font-bold flex items-center gap-1"
                   title="Set all racers to Rounded body"
                 >
-                  All 🟤
+                  <svg className="w-3 h-3" viewBox="0 0 12 12">
+                    <rect x="1" y="1" width="10" height="10" rx="3" fill="#78350f" stroke="#0f172a" strokeWidth="1.2" />
+                  </svg>
+                  <span>All Soft</span>
                 </button>
                 <button
                   type="button"
                   onClick={() => setTeamList(prev => prev.map(t => ({ ...t, shape: 'circle' })))}
-                  className="paper-btn bg-slate-50 hover:bg-slate-100 text-[10px] px-1.5 py-0.5 font-bold"
+                  className="paper-btn bg-slate-50 hover:bg-slate-100 text-[10px] px-1.5 py-0.5 font-bold flex items-center gap-1"
                   title="Set all racers to Circle body"
                 >
-                  All 🟢
+                  <Circle className="w-3 h-3 fill-emerald-600 text-slate-900" />
+                  <span>All Circle</span>
+                </button>
+                <div className="h-3.5 w-[1px] bg-slate-300 mx-0.5"></div>
+                <button
+                  type="button"
+                  onClick={() => setTeamList(prev => prev.map(t => ({ ...t, maxHp: 100 })))}
+                  className="paper-btn bg-emerald-100 hover:bg-emerald-200 text-emerald-950 text-[10px] px-2 py-0.5 font-black flex items-center gap-1"
+                  title="Reset all racers health to 100 HP"
+                >
+                  <Heart className="w-3 h-3 fill-rose-500 text-rose-600" />
+                  <span>All 100 HP</span>
                 </button>
               </div>
             </div>
@@ -5461,6 +5697,8 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                 const isSelected = team.enabled !== false;
                 const shape = team.shape || 'square';
                 const elasticity = team.elasticity !== undefined ? team.elasticity : 1.0;
+                const maxHp = team.maxHp ?? 100;
+                const alliance = team.battleAlliance || (idx < 4 ? 'A' : 'B');
 
                 return (
                   <div
@@ -5531,6 +5769,51 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                         />
                       </div>
 
+                      {/* Health (HP) & Battle Team Alliance */}
+                      <div className="grid grid-cols-2 gap-1.5 pt-2">
+                        <NumberStepper
+                          label="Health (HP)"
+                          unit="HP"
+                          value={maxHp}
+                          min={10}
+                          max={1000}
+                          step={10}
+                          onChange={(val) => {
+                            const updated = [...teamList];
+                            updated[idx] = { ...updated[idx], maxHp: val };
+                            setTeamList(updated);
+                          }}
+                        />
+                        <div>
+                          <span className="block text-[9px] font-black text-slate-600 uppercase mb-0.5">
+                            Battle Team
+                          </span>
+                          <div className="grid grid-cols-2 gap-1">
+                            {(['A', 'B'] as const).map((al) => (
+                              <button
+                                key={al}
+                                type="button"
+                                disabled={!isSelected}
+                                onClick={() => {
+                                  const updated = [...teamList];
+                                  updated[idx] = { ...updated[idx], battleAlliance: al };
+                                  setTeamList(updated);
+                                }}
+                                className={`paper-btn text-[10px] py-1 font-black cursor-pointer ${
+                                  alliance === al
+                                    ? al === 'A'
+                                      ? '!bg-sky-500 !text-white'
+                                      : '!bg-rose-500 !text-white'
+                                    : 'bg-slate-100 text-slate-700'
+                                }`}
+                              >
+                                Team {al}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      </div>
+
                       {/* Shape Selector */}
                       <div className="pt-2">
                         <span className="block text-[10px] font-extrabold text-slate-700 uppercase mb-1">
@@ -5549,13 +5832,30 @@ export const EditorScene: React.FC<EditorSceneProps> = ({
                                   updated[idx] = { ...updated[idx], shape: s };
                                   setTeamList(updated);
                                 }}
-                                className={`paper-btn text-[10px] py-1 font-bold capitalize select-none ${
+                                className={`paper-btn text-[10px] py-1 font-bold capitalize select-none flex items-center justify-center gap-1 ${
                                   isCur
                                     ? '!bg-slate-900 !text-white'
                                     : '!bg-slate-100 !text-slate-800 hover:!bg-slate-200'
                                 }`}
                               >
-                                {s === 'square' ? '⬛ Square' : s === 'rounded' ? '🟤 Soft' : '🟢 Round'}
+                                {s === 'square' ? (
+                                  <>
+                                    <Square className="w-2.5 h-2.5 fill-current" />
+                                    <span>Square</span>
+                                  </>
+                                ) : s === 'rounded' ? (
+                                  <>
+                                    <svg className="w-2.5 h-2.5" viewBox="0 0 12 12">
+                                      <rect x="1" y="1" width="10" height="10" rx="3" fill="currentColor" />
+                                    </svg>
+                                    <span>Soft</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Circle className="w-2.5 h-2.5 fill-current" />
+                                    <span>Round</span>
+                                  </>
+                                )}
                               </button>
                             );
                           })}

@@ -11,6 +11,7 @@ import type {
 } from '../ecs/Component';
 import { Geometry } from '../math/Geometry';
 import { Sound } from '../audio/SoundEngine';
+import { WEAPON_SPECS } from '../registry/PickupRegistry';
 import type { CorridorRect } from '../../types/game';
 
 interface RacerEntry {
@@ -141,6 +142,14 @@ export class PhysicsSystem implements ISystem {
           if (state.speedBoostTimer > 0) state.speedBoostTimer = Math.max(0, state.speedBoostTimer - dt);
           if (state.invulnTimer > 0) state.invulnTimer = Math.max(0, state.invulnTimer - dt);
           if (state.weaponCooldown > 0) state.weaponCooldown = Math.max(0, state.weaponCooldown - dt);
+          if (state.hitFlashTimer > 0) state.hitFlashTimer = Math.max(0, state.hitFlashTimer - dt);
+          if (state.muzzleFlashTimer > 0) state.muzzleFlashTimer = Math.max(0, state.muzzleFlashTimer - dt);
+          if (state.recoilTimer > 0) state.recoilTimer = Math.max(0, state.recoilTimer - dt);
+
+          // Auto-aim & fire if holding a firearm (Uzi, UMP, AK, Mini 14, SCAR)
+          if (state.weapon && state.weapon !== 'knife') {
+            this.handleFirearmAutoShoot(r);
+          }
         }
 
         const half = col.size / 2;
@@ -238,15 +247,17 @@ export class PhysicsSystem implements ISystem {
           vel.vy = Math.sin(angle) * spd;
         }
 
-        // Check Finish Line Alcove (supports any rotation angle)
-        const relX = pos.x - fzCx;
-        const relY = pos.y - fzCy;
-        const localX = fzCx + relX * cosR - relY * sinR;
-        const localY = fzCy + relX * sinR + relY * cosR;
-        if (Geometry.aabbOverlap(localX - half - 2, localY - half - 2, col.size + 4, col.size + 4, fz.x, fz.y, fz.w, fz.h)) {
-          state.progress = 100;
-          if (!this.sim.winnerDeclared) {
-            this.sim.declareWinner(state.team);
+        // Check Finish Line Alcove (only in Races mode when Finish Zone is active)
+        if (!this.sim.currentMap.hideFinishZone && (this.sim.currentMap.trackType || 'races') !== 'battler') {
+          const relX = pos.x - fzCx;
+          const relY = pos.y - fzCy;
+          const localX = fzCx + relX * cosR - relY * sinR;
+          const localY = fzCy + relX * sinR + relY * cosR;
+          if (Geometry.aabbOverlap(localX - half - 2, localY - half - 2, col.size + 4, col.size + 4, fz.x, fz.y, fz.w, fz.h)) {
+            state.progress = 100;
+            if (!this.sim.winnerDeclared) {
+              this.sim.declareWinner(state.team);
+            }
           }
         }
       }
@@ -370,6 +381,7 @@ export class PhysicsSystem implements ISystem {
    */
   private crushRacer(pos: TransformComponent, state: RacerStateComponent, label = 'SQUEEZED!'): void {
     if (!state.alive) return;
+    state.hp = 0;
     state.alive = false;
     state.petrifiedBy = 'flood';
     Sound.play('knife_kill');
@@ -378,6 +390,7 @@ export class PhysicsSystem implements ISystem {
     this.sim.spawnFloatingText(pos.x, pos.y - 14, label, 0x06f9f9);
     this.sim.triggerHitStop(0.045);
     this.sim.addScreenShake(8.5);
+    this.sim.notifyStatsChanged(true);
   }
 
   /**
@@ -754,6 +767,87 @@ export class PhysicsSystem implements ISystem {
     return false;
   }
 
+  private handleFirearmAutoShoot(shooter: RacerEntry): void {
+    const { pos, state } = shooter;
+    if (!state.weapon || state.weapon === 'knife') return;
+    const spec = WEAPON_SPECS[state.weapon];
+    if (!spec) return;
+
+    // Find closest valid enemy within weapon range
+    let bestTarget: RacerEntry | null = null;
+    let bestDistSq = spec.range * spec.range;
+
+    for (let i = 0; i < this.racerList.length; i++) {
+      const cand = this.racerList[i];
+      if (cand.id === shooter.id || !cand.state.alive) continue;
+      if (this.sim.areRacersAllies(state, cand.state)) continue;
+
+      const dx = cand.pos.x - pos.x;
+      const dy = cand.pos.y - pos.y;
+      const dSq = dx * dx + dy * dy;
+      if (dSq <= bestDistSq) {
+        bestDistSq = dSq;
+        bestTarget = cand;
+      }
+    }
+
+    if (bestTarget) {
+      const baseAng = Math.atan2(bestTarget.pos.y - pos.y, bestTarget.pos.x - pos.x);
+      state.aimAngle = baseAng;
+
+      if (state.weaponCooldown <= 0) {
+        const weaponType = state.weapon;
+        const shotAng = baseAng + (Math.random() - 0.5) * spec.spread;
+        const muzzleDist = shooter.col.size / 2 + spec.barrelLen;
+        const mx = pos.x + Math.cos(baseAng) * muzzleDist;
+        const my = pos.y + Math.sin(baseAng) * muzzleDist;
+
+        this.sim.spawnProjectile({
+          x: mx,
+          y: my,
+          vx: Math.cos(shotAng) * spec.bulletSpeed,
+          vy: Math.sin(shotAng) * spec.bulletSpeed,
+          damage: spec.damage,
+          color: spec.css,
+          colorHex: spec.color,
+          ownerId: shooter.id,
+          ownerTeamId: state.team.id,
+          battleAlliance: state.battleAlliance,
+          life: spec.range / spec.bulletSpeed + 0.15,
+        });
+
+        // Eject brass shell casing sideways from gun receiver
+        const receiverX = pos.x + Math.cos(baseAng) * (shooter.col.size / 2 + 4);
+        const receiverY = pos.y + Math.sin(baseAng) * (shooter.col.size / 2 + 4);
+        this.sim.spawnShellCasing(receiverX, receiverY, baseAng);
+
+        // Trigger muzzle flash, recoil kickback, weapon-specific SFX, and subtle camera punch
+        state.muzzleFlashTimer = 0.065;
+        state.recoilTimer = 0.085;
+        state.weaponCooldown = spec.cooldown;
+        state.weaponAmmo = Math.max(0, state.weaponAmmo - 1);
+
+        Sound.play(`gun_${weaponType}`);
+        this.sim.addScreenShake(weaponType === 'ak' || weaponType === 'mini14' ? 1.5 : 0.8);
+
+        if (state.weaponAmmo <= 0) {
+          state.weapon = null;
+          state.weaponAmmo = 0;
+          state.weaponMaxAmmo = 0;
+          state.muzzleFlashTimer = 0;
+          state.recoilTimer = 0;
+          Sound.play('ammo_empty');
+          this.sim.spawnConfetti(receiverX, receiverY, 0x94a3b8, 6);
+        }
+
+        this.sim.notifyStatsChanged();
+      }
+    } else {
+      // Point firearm along movement direction when no enemy in range
+      state.aimAngle = Math.atan2(shooter.vel.vy, shooter.vel.vx);
+    }
+  }
+
   private handleCombatContact(
     world: World,
     idA: number,
@@ -764,7 +858,7 @@ export class PhysicsSystem implements ISystem {
     pB: TransformComponent
   ): void {
     if (!stA.alive || !stB.alive) return;
-    if (stA.team.id === stB.team.id) return;
+    if (this.sim.areRacersAllies(stA, stB)) return;
 
     if (stA.weapon === 'knife' && stA.weaponCooldown <= 0 && stB.invulnTimer <= 0) {
       this.executeKnifeStrike(world, idA, idB, stA, stB, pA, pB);
@@ -776,7 +870,7 @@ export class PhysicsSystem implements ISystem {
   private executeKnifeStrike(
     _world: World,
     _attId: number,
-    _vicId: number,
+    vicId: number,
     attState: RacerStateComponent,
     vicState: RacerStateComponent,
     attPos: TransformComponent,
@@ -786,23 +880,7 @@ export class PhysicsSystem implements ISystem {
     const dropX = (attPos.x + vicPos.x) * 0.5;
     const dropY = (attPos.y + vicPos.y) * 0.5;
 
-    if (vicState.shield) {
-      vicState.shield = false;
-      vicState.invulnTimer = 0.5;
-      Sound.play('gate_break');
-      this.sim.spawnFloatingText(vicPos.x, vicPos.y - 12, 'SHIELD BLOCK!', 0x38bdf8);
-      this.sim.spawnConfetti(vicPos.x, vicPos.y, 0x38bdf8, 12);
-    } else {
-      vicState.alive = false;
-      vicState.petrifiedBy = 'knife';
-      Sound.play('knife_kill');
-      this.sim.spawnInkSplatter(vicPos.x, vicPos.y, vicState.team.hex);
-      this.sim.spawnConfetti(vicPos.x, vicPos.y, vicState.team.hex, 20);
-      this.sim.spawnFloatingText(vicPos.x, vicPos.y - 14, 'SLICED!', vicState.team.hex);
-      this.sim.triggerHitStop(0.055);
-      this.sim.addScreenShake(7.5);
-    }
-
+    this.sim.damageRacer(vicId, vicPos, vicState, 55, 'knife', attState);
     this.sim.spawnPickup('knife', dropX, dropY, 0.45);
   }
 

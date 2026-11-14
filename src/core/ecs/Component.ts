@@ -1,4 +1,4 @@
-import type { TeamConfig, BarrierMovement } from '../../types/game';
+import type { TeamConfig, BarrierMovement, WeaponType } from '../../types/game';
 
 /**
  * Pure ECS Components (Data-only structs)
@@ -21,13 +21,23 @@ export interface ColliderComponent {
 export interface RacerStateComponent {
   team: TeamConfig;
   alive: boolean;
+  hp: number;
+  maxHp: number;
   progress: number;
-  weapon: 'knife' | null;
+  weapon: WeaponType | null;
   weaponCooldown: number;
+  weaponAmmo: number;
+  weaponMaxAmmo: number;
+  muzzleFlashTimer: number;
+  recoilTimer: number;
+  aimAngle: number;
+  hitFlashTimer: number;
+  kills: number;
+  battleAlliance?: 'A' | 'B' | 'boss';
   shield: boolean;
   speedBoostTimer: number;
   invulnTimer: number;
-  petrifiedBy: 'knife' | 'flood' | null;
+  petrifiedBy: 'knife' | 'flood' | 'gun' | null;
 }
 
 export interface GateComponent {

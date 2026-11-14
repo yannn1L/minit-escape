@@ -22,13 +22,26 @@ export class Geometry {
   }
 
   /**
-   * Zero-allocation check if a single point is inside any walkable corridor
+   * Zero-allocation check if a single point is inside a specific corridor or circular room
+   */
+  static isPointInCorridor(px: number, py: number, c: CorridorRect): boolean {
+    if (c.shape === 'circle') {
+      const rx = Math.max(1, c.w / 2);
+      const ry = Math.max(1, c.h / 2);
+      const dx = (px - (c.x + rx)) / rx;
+      const dy = (py - (c.y + ry)) / ry;
+      return dx * dx + dy * dy <= 1.0;
+    }
+    return px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h;
+  }
+
+  /**
+   * Zero-allocation check if a single point is inside any walkable corridor or circular room
    */
   static isPointInCorridors(px: number, py: number, corridors: CorridorRect[]): boolean {
     const len = corridors.length;
     for (let j = 0; j < len; j++) {
-      const c = corridors[j];
-      if (px >= c.x && px <= c.x + c.w && py >= c.y && py <= c.y + c.h) {
+      if (this.isPointInCorridor(px, py, corridors[j])) {
         return true;
       }
     }
@@ -36,8 +49,8 @@ export class Geometry {
   }
 
   /**
-   * Zero-allocation check if a square box (cx, cy, halfSize) is completely inside the union of walkable track corridors.
-   * - Stage 1 (Fast Path): If the entire box lies within any single corridor, returns true immediately.
+   * Zero-allocation check if a square box (cx, cy, halfSize) is completely inside the union of walkable track corridors/rooms.
+   * - Stage 1 (Fast Path): If the entire box lies within any single corridor or circle room, returns true immediately.
    * - Stage 2 (Junction Path): Checks all 9 boundary points (4 corners, 4 edge midpoints, center) using pure scalars.
    */
   static isBoxInsideCorridors(cx: number, cy: number, half: number, corridors: CorridorRect[]): boolean {
@@ -49,23 +62,40 @@ export class Geometry {
     const minY = cy - h;
     const maxY = cy + h;
 
-    // Fast path: check if any single corridor completely contains the box (>90% of cases)
+    // Fast path: check if any single corridor/room completely contains the box
     let centerInsideAny = false;
     for (let j = 0; j < len; j++) {
       const c = corridors[j];
-      const cMaxX = c.x + c.w;
-      const cMaxY = c.y + c.h;
-      if (cx >= c.x && cx <= cMaxX && cy >= c.y && cy <= cMaxY) {
-        centerInsideAny = true;
-        if (minX >= c.x && maxX <= cMaxX && minY >= c.y && maxY <= cMaxY) {
-          return true;
+      if (c.shape === 'circle') {
+        const rx = Math.max(1, c.w / 2);
+        const ry = Math.max(1, c.h / 2);
+        const ccx = c.x + rx;
+        const ccy = c.y + ry;
+        const cdx = (cx - ccx) / rx;
+        const cdy = (cy - ccy) / ry;
+        if (cdx * cdx + cdy * cdy <= 1.0) {
+          centerInsideAny = true;
+          const maxDx = (Math.abs(cx - ccx) + h) / rx;
+          const maxDy = (Math.abs(cy - ccy) + h) / ry;
+          if (maxDx * maxDx + maxDy * maxDy <= 1.0) {
+            return true;
+          }
+        }
+      } else {
+        const cMaxX = c.x + c.w;
+        const cMaxY = c.y + c.h;
+        if (cx >= c.x && cx <= cMaxX && cy >= c.y && cy <= cMaxY) {
+          centerInsideAny = true;
+          if (minX >= c.x && maxX <= cMaxX && minY >= c.y && maxY <= cMaxY) {
+            return true;
+          }
         }
       }
     }
 
     if (!centerInsideAny) return false;
 
-    // Junction path: box straddles 2+ corridors, verify remaining 8 perimeter points without allocating objects
+    // Junction path: box straddles 2+ corridors/rooms, verify remaining 8 perimeter points without allocating objects
     return (
       this.isPointInCorridors(minX, minY, corridors) &&
       this.isPointInCorridors(maxX, minY, corridors) &&
@@ -80,7 +110,7 @@ export class Geometry {
 
   /**
    * If a racer box ever gets pushed slightly into a wall (by a moving barrier, gate, or racer-to-racer collision),
-   * snap it back to the nearest valid interior point inside the walkable corridors so it never gets stuck on a wall.
+   * snap it back to the nearest valid interior point inside the walkable corridors/rooms so it never gets stuck on a wall.
    */
   static snapBoxInsideCorridors(
     cx: number,
@@ -103,20 +133,40 @@ export class Geometry {
       }
     }
 
-    // 2. Fallback: clamp to the interior of the closest corridor
+    // 2. Fallback: clamp to the interior of the closest corridor or circular room
     let bestX = cx;
     let bestY = cy;
     let bestDistSq = Infinity;
-    const pad = half + 1;
+    const pad = half + 1.5;
 
     for (let i = 0; i < corridors.length; i++) {
       const c = corridors[i];
-      const minX = c.x + Math.min(pad, c.w / 2);
-      const maxX = c.x + c.w - Math.min(pad, c.w / 2);
-      const minY = c.y + Math.min(pad, c.h / 2);
-      const maxY = c.y + c.h - Math.min(pad, c.h / 2);
-      const clampedX = Math.max(minX, Math.min(maxX, cx));
-      const clampedY = Math.max(minY, Math.min(maxY, cy));
+      let clampedX = cx;
+      let clampedY = cy;
+
+      if (c.shape === 'circle') {
+        const rx = Math.max(1, c.w / 2);
+        const ry = Math.max(1, c.h / 2);
+        const ccx = c.x + rx;
+        const ccy = c.y + ry;
+        const safeRx = Math.max(2, rx - pad);
+        const safeRy = Math.max(2, ry - pad);
+        const ndx = (cx - ccx) / safeRx;
+        const ndy = (cy - ccy) / safeRy;
+        const nLen = Math.hypot(ndx, ndy);
+        if (nLen > 1) {
+          clampedX = ccx + (ndx / nLen) * safeRx;
+          clampedY = ccy + (ndy / nLen) * safeRy;
+        }
+      } else {
+        const minX = c.x + Math.min(pad, c.w / 2);
+        const maxX = c.x + c.w - Math.min(pad, c.w / 2);
+        const minY = c.y + Math.min(pad, c.h / 2);
+        const maxY = c.y + c.h - Math.min(pad, c.h / 2);
+        clampedX = Math.max(minX, Math.min(maxX, cx));
+        clampedY = Math.max(minY, Math.min(maxY, cy));
+      }
+
       const dSq = (clampedX - cx) * (clampedX - cx) + (clampedY - cy) * (clampedY - cy);
       if (dSq < bestDistSq) {
         bestDistSq = dSq;
@@ -126,6 +176,34 @@ export class Geometry {
     }
 
     return { x: bestX, y: bestY, snapped: true };
+  }
+
+  /**
+   * Pick a random valid floor point inside any walkable corridor or circular room
+   */
+  static randomPointInCorridors(corridors: CorridorRect[], pad = 22): { x: number; y: number } {
+    if (!corridors || corridors.length === 0) {
+      return { x: 250, y: 400 };
+    }
+    const c = corridors[Math.floor(Math.random() * corridors.length)];
+    if (c.shape === 'circle') {
+      const rx = Math.max(8, c.w / 2 - pad);
+      const ry = Math.max(8, c.h / 2 - pad);
+      const ccx = c.x + c.w / 2;
+      const ccy = c.y + c.h / 2;
+      const r = Math.sqrt(Math.random()) * 0.85;
+      const theta = Math.random() * Math.PI * 2;
+      return {
+        x: Math.round(ccx + Math.cos(theta) * rx * r),
+        y: Math.round(ccy + Math.sin(theta) * ry * r),
+      };
+    }
+    const safeW = Math.max(10, c.w - pad * 2);
+    const safeH = Math.max(10, c.h - pad * 2);
+    return {
+      x: Math.round(c.x + pad + Math.random() * safeW),
+      y: Math.round(c.y + pad + Math.random() * safeH),
+    };
   }
 
   /**

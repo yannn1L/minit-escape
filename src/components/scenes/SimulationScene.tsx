@@ -279,6 +279,7 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
                 styleMode={layout.racersListStyle || 'detailed'}
                 columnsMode={layout.racersListColumns || 'auto'}
                 position="top"
+                trackType={simulation.currentMap.trackType || 'races'}
               />
             </div>
           )}
@@ -317,6 +318,7 @@ export const SimulationScene: React.FC<SimulationSceneProps> = ({
                 styleMode={layout.racersListStyle || 'detailed'}
                 columnsMode={layout.racersListColumns || 'auto'}
                 position="bottom"
+                trackType={simulation.currentMap.trackType || 'races'}
               />
             </div>
           )}

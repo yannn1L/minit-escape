@@ -35,8 +35,9 @@ export const SynthLabModal: React.FC<SynthLabModalProps> = ({ isOpen, onClose })
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b-2 border-slate-900">
           <div className="flex items-center gap-2">
+            <Volume2 className="w-5 h-5 text-indigo-700" />
             <span className="text-base sm:text-lg font-black text-slate-900">
-              🎹 Audio Synthesizer Lab
+              Audio Synthesizer Lab
             </span>
           </div>
           <button

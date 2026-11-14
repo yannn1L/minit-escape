@@ -1,7 +1,7 @@
 import type { ISystem } from '../ecs/System';
 import type { World } from '../ecs/World';
 import { GlobalRegistry } from '../registry/StrategyRegistry';
-import type { PickupStrategy } from '../registry/PickupRegistry';
+import { drawFirearmShape, type PickupStrategy } from '../registry/PickupRegistry';
 
 export class RenderSystem implements ISystem {
   name = 'RenderSystem';
@@ -44,12 +44,18 @@ export class RenderSystem implements ISystem {
     const corridors = this.sim.currentMap.corridors;
     const len = corridors.length;
 
-    // 1. Outer Dark Drop Shadow (frustum-culled)
+    // 1. Outer Dark Drop Shadow (frustum-culled, supports rect & circle rooms)
     ctx.fillStyle = 'rgba(15, 23, 42, 0.35)';
     for (let i = 0; i < len; i++) {
       const c = corridors[i];
       if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
-      ctx.fillRect(c.x + 5, c.y + 6, c.w, c.h);
+      if (c.shape === 'circle') {
+        ctx.beginPath();
+        ctx.ellipse(c.x + c.w / 2 + 5, c.y + c.h / 2 + 6, Math.max(4, c.w / 2), Math.max(4, c.h / 2), 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(c.x + 5, c.y + 6, c.w, c.h);
+      }
     }
 
     // 2. Crisp Black Outer Cutout Border
@@ -57,7 +63,13 @@ export class RenderSystem implements ISystem {
     for (let i = 0; i < len; i++) {
       const c = corridors[i];
       if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
-      ctx.fillRect(c.x - 3, c.y - 3, c.w + 6, c.h + 6);
+      if (c.shape === 'circle') {
+        ctx.beginPath();
+        ctx.ellipse(c.x + c.w / 2, c.y + c.h / 2, Math.max(4, c.w / 2 + 3), Math.max(4, c.h / 2 + 3), 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(c.x - 3, c.y - 3, c.w + 6, c.h + 6);
+      }
     }
 
     // 3. Inner Paper Bevel
@@ -65,7 +77,13 @@ export class RenderSystem implements ISystem {
     for (let i = 0; i < len; i++) {
       const c = corridors[i];
       if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
-      ctx.fillRect(c.x, c.y, c.w, c.h);
+      if (c.shape === 'circle') {
+        ctx.beginPath();
+        ctx.ellipse(c.x + c.w / 2, c.y + c.h / 2, Math.max(4, c.w / 2), Math.max(4, c.h / 2), 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(c.x, c.y, c.w, c.h);
+      }
     }
 
     // 4. Bright White Paper Track Interior
@@ -73,10 +91,19 @@ export class RenderSystem implements ISystem {
     for (let i = 0; i < len; i++) {
       const c = corridors[i];
       if (!this.isRectVisible(c.x - 4, c.y - 4, c.w + 12, c.h + 12)) continue;
-      ctx.fillRect(c.x + 3, c.y + 3, c.w - 3, c.h - 3);
+      if (c.shape === 'circle') {
+        ctx.beginPath();
+        ctx.ellipse(c.x + c.w / 2 + 1.5, c.y + c.h / 2 + 1.5, Math.max(4, c.w / 2 - 1.5), Math.max(4, c.h / 2 - 1.5), 0, 0, Math.PI * 2);
+        ctx.fill();
+      } else {
+        ctx.fillRect(c.x + 3, c.y + 3, c.w - 3, c.h - 3);
+      }
     }
 
-    // 5. Green Checkered Finish Alcove (supports rotation, frustum-culled)
+    // 5. Green Checkered Finish Alcove (hidden in Battler mode or when hideFinishZone is set)
+    if (this.sim.currentMap.hideFinishZone || (this.sim.currentMap.trackType || 'races') === 'battler') {
+      return;
+    }
     const fz = this.sim.currentMap.finishZone;
     const padFz = Math.max(fz.w, fz.h);
     if (!this.isRectVisible(fz.x - padFz, fz.y - padFz, fz.w + padFz * 2, fz.h + padFz * 2)) {
@@ -198,7 +225,10 @@ export class RenderSystem implements ISystem {
     // 7. Draw Racers
     this.drawRacers(world, ctx, dt);
 
-    // 8. Draw Confetti Particles
+    // 7b. Draw Active Gun Projectiles & Tracers
+    this.drawProjectiles(ctx);
+
+    // 8. Draw Confetti & Shell Casing Particles
     this.drawParticles(ctx);
 
     // 9. Draw Floating Texts
@@ -354,17 +384,28 @@ export class RenderSystem implements ISystem {
       ctx.lineWidth = 2.5;
       ctx.strokeRect(bx, by, bw, bh);
 
-      // Movement indicator arrow on moving barriers
+      // Vector movement indicator arrow on moving barriers (no unicode text)
       if (!isStatic) {
-        ctx.fillStyle = '#0f172a';
-        ctx.font = 'bold 8px monospace';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        let label = '↔';
-        if (bar.movement === 'vertical') label = '↕';
-        else if (bar.movement === 'diagonal_up') label = '↗';
-        else if (bar.movement === 'diagonal_down') label = '↘';
-        ctx.fillText(label, bx + bw / 2, by + bh / 2);
+        const cx = bx + bw / 2;
+        const cy = by + bh / 2;
+        let dx = 4;
+        let dy = 0;
+        if (bar.movement === 'vertical') {
+          dx = 0;
+          dy = 4;
+        } else if (bar.movement === 'diagonal_up') {
+          dx = 3.2;
+          dy = -3.2;
+        } else if (bar.movement === 'diagonal_down') {
+          dx = 3.2;
+          dy = 3.2;
+        }
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 1.8;
+        ctx.beginPath();
+        ctx.moveTo(cx - dx, cy - dy);
+        ctx.lineTo(cx + dx, cy + dy);
+        ctx.stroke();
       }
     }
   }
@@ -502,7 +543,7 @@ export class RenderSystem implements ISystem {
 
       // 4. Main Body with custom shape
       const bodyColor = st.alive
-        ? st.team.css
+        ? (st.hitFlashTimer > 0 ? '#ffffff' : st.team.css)
         : (st.petrifiedBy === 'knife' ? '#78716c' : '#475569');
 
       ctx.fillStyle = bodyColor;
@@ -569,7 +610,7 @@ export class RenderSystem implements ISystem {
         ctx.fillRect(rightEyeX - 2.2, eyeY - 2.2, 4.4, 4.4);
       }
 
-      // 6. Equipped Rotating Knife
+      // 6. Equipped Rotating Knife or Firearm (Uzi, UMP, AK, Mini 14, SCAR)
       if (st.alive && st.weapon === 'knife') {
         const angle = Math.atan2(vel.vy, vel.vx);
         const kx = Math.cos(angle) * (half + 6);
@@ -596,8 +637,215 @@ export class RenderSystem implements ISystem {
         ctx.fill();
         ctx.stroke();
         ctx.restore();
+      } else if (
+        st.alive &&
+        st.weaponAmmo > 0 &&
+        (st.weapon === 'uzi' ||
+          st.weapon === 'ump' ||
+          st.weapon === 'ak' ||
+          st.weapon === 'mini14' ||
+          st.weapon === 'scar')
+      ) {
+        const angle = st.aimAngle ?? Math.atan2(vel.vy, vel.vx);
+        const recoilKick = st.recoilTimer > 0 ? -3.6 * (st.recoilTimer / 0.085) : 0;
+        const dist = half + 4 + recoilKick;
+        const gx = Math.cos(angle) * dist;
+        const gy = Math.sin(angle) * dist;
+
+        ctx.save();
+        ctx.translate(gx, gy);
+        ctx.rotate(angle);
+        if (Math.cos(angle) < 0) {
+          ctx.scale(1, -1);
+        }
+        drawFirearmShape(ctx, st.weapon, 0.92);
+
+        // Crisp 2.5D Paper-Cut Muzzle Flash Burst at Barrel Tip
+        if (st.muzzleFlashTimer > 0) {
+          const tipX = st.weapon === 'mini14' ? 13 : st.weapon === 'ak' ? 13.5 : 10.5;
+          const tipY = -1.2;
+          const flashScale = 0.75 + (st.muzzleFlashTimer / 0.065) * 0.55;
+
+          ctx.save();
+          ctx.translate(tipX, tipY);
+          ctx.scale(flashScale, flashScale);
+
+          // Outer bright orange/gold star burst
+          ctx.fillStyle = '#f97316';
+          ctx.strokeStyle = '#0f172a';
+          ctx.lineWidth = 1.2;
+          ctx.beginPath();
+          ctx.moveTo(0, -4.5);
+          ctx.lineTo(4.5, -1.8);
+          ctx.lineTo(10.5, 0);
+          ctx.lineTo(4.5, 1.8);
+          ctx.lineTo(0, 4.5);
+          ctx.lineTo(-1.5, 0);
+          ctx.closePath();
+          ctx.fill();
+          ctx.stroke();
+
+          // Inner white-hot core
+          ctx.fillStyle = '#fef08a';
+          ctx.beginPath();
+          ctx.arc(2.2, 0, 2.2, 0, Math.PI * 2);
+          ctx.fill();
+
+          ctx.restore();
+        }
+
+        ctx.restore();
       }
 
+      ctx.restore();
+
+      // 7. Overhead Health Bar, Visual Ammo Cartridges & Boss Crown (rendered un-squashed above racer)
+      const isBattler = (this.sim.currentMap?.trackType || 'races') === 'battler';
+      const showHpBar = st.alive && (isBattler || st.hp < st.maxHp);
+      let topOffsetY = pos.y - half - 7;
+
+      if (showHpBar) {
+        const barW = Math.max(18, size + 4);
+        const barH = 3.5;
+        const barX = pos.x - barW / 2;
+        const barY = topOffsetY;
+        const hpRatio = Math.max(0, Math.min(1, st.hp / Math.max(1, st.maxHp)));
+
+        ctx.fillStyle = '#0f172a';
+        ctx.fillRect(barX - 1, barY - 1, barW + 2, barH + 2);
+        ctx.fillStyle = '#334155';
+        ctx.fillRect(barX, barY, barW, barH);
+        ctx.fillStyle = hpRatio > 0.55 ? '#4ade80' : hpRatio > 0.25 ? '#facc15' : '#ef4444';
+        ctx.fillRect(barX, barY, barW * hpRatio, barH);
+
+        topOffsetY -= 7.5;
+      }
+
+      // Visual Ammo Cartridges at the Top of the Racer (disappears immediately when out of ammo)
+      if (
+        st.alive &&
+        st.weapon &&
+        st.weapon !== 'knife' &&
+        st.weaponAmmo > 0
+      ) {
+        const curAmmo = st.weaponAmmo;
+        const maxAmmo = Math.max(curAmmo, st.weaponMaxAmmo || curAmmo);
+        // Display up to 10 individual vertical bullet cartridges in a crisp belt above the racer
+        const totalSlots = Math.min(10, maxAmmo);
+        const filledSlots = Math.max(
+          1,
+          Math.ceil((curAmmo / maxAmmo) * totalSlots)
+        );
+        const bulletW = 2.4;
+        const bulletH = 5.6;
+        const gap = 1.1;
+        const beltW = totalSlots * bulletW + (totalSlots - 1) * gap;
+        const startX = pos.x - beltW / 2;
+        const beltY = topOffsetY - 1.5;
+
+        // Backing belt plate
+        ctx.fillStyle = 'rgba(15, 23, 42, 0.88)';
+        ctx.fillRect(startX - 1.5, beltY - 1.5, beltW + 3, bulletH + 2.8);
+
+        for (let b = 0; b < totalSlots; b++) {
+          const bx = startX + b * (bulletW + gap);
+          const isLoaded = b < filledSlots;
+          if (isLoaded) {
+            // Pointed copper warhead tip at top
+            ctx.fillStyle = '#f97316';
+            ctx.beginPath();
+            ctx.moveTo(bx + bulletW / 2, beltY - 0.6);
+            ctx.lineTo(bx + bulletW, beltY + 1.8);
+            ctx.lineTo(bx, beltY + 1.8);
+            ctx.closePath();
+            ctx.fill();
+
+            // Golden brass cartridge body
+            ctx.fillStyle = '#facc15';
+            ctx.fillRect(bx, beltY + 1.8, bulletW, bulletH - 1.8);
+
+            // Brass rim base highlight
+            ctx.fillStyle = '#fef08a';
+            ctx.fillRect(bx, beltY + bulletH - 1, bulletW, 0.9);
+          } else {
+            // Spent empty slot
+            ctx.fillStyle = 'rgba(100, 116, 139, 0.45)';
+            ctx.fillRect(bx, beltY + 1, bulletW, bulletH - 1);
+          }
+        }
+
+        topOffsetY -= 8;
+      }
+
+      if (st.alive && st.battleAlliance === 'boss') {
+        ctx.fillStyle = '#facc15';
+        ctx.strokeStyle = '#0f172a';
+        ctx.lineWidth = 1.5;
+        const cy = topOffsetY;
+        ctx.beginPath();
+        ctx.moveTo(pos.x - 6, cy + 2);
+        ctx.lineTo(pos.x - 5, cy - 4);
+        ctx.lineTo(pos.x - 2, cy - 1);
+        ctx.lineTo(pos.x, cy - 5);
+        ctx.lineTo(pos.x + 2, cy - 1);
+        ctx.lineTo(pos.x + 5, cy - 4);
+        ctx.lineTo(pos.x + 6, cy + 2);
+        ctx.closePath();
+        ctx.fill();
+        ctx.stroke();
+      }
+    }
+  }
+
+  private drawProjectiles(ctx: CanvasRenderingContext2D): void {
+    const projectiles = this.sim.projectiles;
+    if (!projectiles || projectiles.length === 0) return;
+
+    for (let i = 0; i < projectiles.length; i++) {
+      const p = projectiles[i];
+      if (!this.isRectVisible(p.x - 16, p.y - 16, 32, 32)) continue;
+
+      const spd = Math.hypot(p.vx, p.vy) || 1;
+      const ux = p.vx / spd;
+      const uy = p.vy / spd;
+      const tx = p.x - ux * 13;
+      const ty = p.y - uy * 13;
+
+      // 1. Outer colored tracer streak
+      ctx.strokeStyle = p.color || '#facc15';
+      ctx.lineWidth = 3.2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(tx, ty);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+
+      // 2. Inner white-hot tracer core
+      ctx.strokeStyle = '#ffffff';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(p.x - ux * 7, p.y - uy * 7);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+
+      // 3. Oriented paper-cut brass/copper bullet head
+      const angle = Math.atan2(uy, ux);
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      ctx.rotate(angle);
+
+      ctx.fillStyle = '#fef08a';
+      ctx.strokeStyle = '#0f172a';
+      ctx.lineWidth = 1.4;
+      ctx.beginPath();
+      ctx.moveTo(4.2, 0);
+      ctx.lineTo(-1.8, -2.2);
+      ctx.lineTo(-3.2, -2.2);
+      ctx.lineTo(-3.2, 2.2);
+      ctx.lineTo(-1.8, 2.2);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
       ctx.restore();
     }
   }

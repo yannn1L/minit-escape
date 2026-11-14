@@ -282,3 +282,157 @@ GlobalRegistry.register('audio', 'game_over', (ctx: AudioContext) => {
   });
 });
 
+// Helper for crisp layered gunshot synthesis (body transient + filtered noise snap)
+function playLayeredGunshot(
+  ctx: AudioContext,
+  engine: SoundEngine,
+  startFreq: number,
+  endFreq: number,
+  dur: number,
+  noiseCutoff: number,
+  noiseFilterType: BiquadFilterType,
+  oscType: OscillatorType,
+  volScale: number
+): void {
+  const now = ctx.currentTime;
+  const masterVol = Math.max(0.05, Sound.config.volume) * volScale;
+
+  // 1. Punchy pitch-drop body oscillator
+  const osc = ctx.createOscillator();
+  const oscGain = ctx.createGain();
+  osc.type = oscType;
+  osc.frequency.setValueAtTime(startFreq, now);
+  osc.frequency.exponentialRampToValueAtTime(Math.max(25, endFreq), now + dur);
+
+  oscGain.gain.setValueAtTime(masterVol, now);
+  oscGain.gain.exponentialRampToValueAtTime(0.001, now + dur);
+
+  osc.connect(oscGain);
+  oscGain.connect(ctx.destination);
+  osc.onended = () => {
+    osc.disconnect();
+    oscGain.disconnect();
+  };
+  osc.start(now);
+  osc.stop(now + dur + 0.01);
+
+  // 2. Crisp mechanical noise burst
+  const noise = ctx.createBufferSource();
+  noise.buffer = engine.getNoiseBuffer(ctx);
+  const filter = ctx.createBiquadFilter();
+  filter.type = noiseFilterType;
+  filter.frequency.setValueAtTime(noiseCutoff, now);
+  filter.Q.setValueAtTime(1.4, now);
+
+  const noiseGain = ctx.createGain();
+  noiseGain.gain.setValueAtTime(masterVol * 0.75, now);
+  noiseGain.gain.exponentialRampToValueAtTime(0.001, now + dur * 0.85);
+
+  noise.connect(filter);
+  filter.connect(noiseGain);
+  noiseGain.connect(ctx.destination);
+  noise.onended = () => {
+    noise.disconnect();
+    filter.disconnect();
+    noiseGain.disconnect();
+  };
+  noise.start(now);
+  noise.stop(now + dur);
+}
+
+// Uzi: Snappy high-cadence submachine pop
+GlobalRegistry.register('audio', 'gun_uzi', (ctx: AudioContext, engine: SoundEngine) => {
+  playLayeredGunshot(ctx, engine, 540, 135, 0.055, 2200, 'bandpass', 'triangle', 0.16);
+});
+
+// UMP: Tactile mid-punch suppressed/tactical thump
+GlobalRegistry.register('audio', 'gun_ump', (ctx: AudioContext, engine: SoundEngine) => {
+  playLayeredGunshot(ctx, engine, 410, 95, 0.075, 1500, 'bandpass', 'triangle', 0.19);
+});
+
+// AK-47: Deep resonant assault rifle boom + metallic crack
+GlobalRegistry.register('audio', 'gun_ak', (ctx: AudioContext, engine: SoundEngine) => {
+  playLayeredGunshot(ctx, engine, 290, 62, 0.105, 1150, 'lowpass', 'sawtooth', 0.22);
+});
+
+// Mini 14: High-velocity supersonic DMR snap
+GlobalRegistry.register('audio', 'gun_mini14', (ctx: AudioContext, engine: SoundEngine) => {
+  playLayeredGunshot(ctx, engine, 880, 170, 0.095, 3200, 'highpass', 'sawtooth', 0.21);
+});
+
+// SCAR-L: Clean tactical combat rifle punch
+GlobalRegistry.register('audio', 'gun_scar', (ctx: AudioContext, engine: SoundEngine) => {
+  playLayeredGunshot(ctx, engine, 360, 82, 0.085, 1850, 'bandpass', 'square', 0.19);
+});
+
+// Gun Pickup: Crisp mechanical slide rack (2-step click-clack)
+GlobalRegistry.register('audio', 'gun_pickup', (ctx: AudioContext) => {
+  const now = ctx.currentTime;
+  const vol = 0.16 * Sound.config.volume;
+  [
+    { start: 0, f1: 420, f2: 760, d: 0.045 },
+    { start: 0.055, f1: 680, f2: 1240, d: 0.055 },
+  ].forEach((step) => {
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.setValueAtTime(step.f1, now + step.start);
+    osc.frequency.exponentialRampToValueAtTime(step.f2, now + step.start + step.d);
+    gain.gain.setValueAtTime(vol, now + step.start);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + step.start + step.d);
+    osc.connect(gain);
+    gain.connect(ctx.destination);
+    osc.start(now + step.start);
+    osc.stop(now + step.start + step.d + 0.01);
+  });
+});
+
+// Bullet Hit on Racer: Satisfying low thud + crisp hitmarker ping
+GlobalRegistry.register('audio', 'bullet_hit', (ctx: AudioContext) => {
+  const now = ctx.currentTime;
+  const vol = 0.18 * Sound.config.volume;
+
+  // Low body thud
+  const thud = ctx.createOscillator();
+  const thudGain = ctx.createGain();
+  thud.type = 'sine';
+  thud.frequency.setValueAtTime(210, now);
+  thud.frequency.exponentialRampToValueAtTime(58, now + 0.065);
+  thudGain.gain.setValueAtTime(vol, now);
+  thudGain.gain.exponentialRampToValueAtTime(0.001, now + 0.07);
+  thud.connect(thudGain);
+  thudGain.connect(ctx.destination);
+  thud.start(now);
+  thud.stop(now + 0.075);
+
+  // Crisp arcade hitmarker tick
+  const tick = ctx.createOscillator();
+  const tickGain = ctx.createGain();
+  tick.type = 'triangle';
+  tick.frequency.setValueAtTime(1650, now);
+  tick.frequency.exponentialRampToValueAtTime(920, now + 0.03);
+  tickGain.gain.setValueAtTime(vol * 0.7, now);
+  tickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.035);
+  tick.connect(tickGain);
+  tickGain.connect(ctx.destination);
+  tick.start(now);
+  tick.stop(now + 0.04);
+});
+
+// Empty Magazine Eject / Out of Ammo Click
+GlobalRegistry.register('audio', 'ammo_empty', (ctx: AudioContext) => {
+  const now = ctx.currentTime;
+  const osc = ctx.createOscillator();
+  const gain = ctx.createGain();
+  osc.type = 'square';
+  osc.frequency.setValueAtTime(960, now);
+  osc.frequency.exponentialRampToValueAtTime(340, now + 0.05);
+  gain.gain.setValueAtTime(0.11 * Sound.config.volume, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.055);
+  osc.connect(gain);
+  gain.connect(ctx.destination);
+  osc.start(now);
+  osc.stop(now + 0.06);
+});
+
+

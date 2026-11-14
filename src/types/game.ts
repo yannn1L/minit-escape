@@ -2,6 +2,32 @@
  * Common Game Types, Constants, and Interfaces
  */
 
+export type WeaponType = 'knife' | 'uzi' | 'ump' | 'ak' | 'mini14' | 'scar';
+
+export type TrackType = 'races' | 'battler';
+
+export type BattlerSubMode = 'ffa' | 'team_battle' | 'boss_fight';
+
+export interface BattlerConfig {
+  subMode: BattlerSubMode;          // 'ffa' | 'team_battle' | 'boss_fight'
+  defaultHp: number;                // Default HP for all racers (default 100)
+  bossTeamId?: string;              // Which racer is the Boss in 'boss_fight' mode
+  bossHpMultiplier?: number;        // Boss HP multiplier (default 4 -> 400 HP)
+  randomWeaponSpawn: boolean;       // Periodically spawn random weapons on the floor
+  weaponSpawnInterval: number;      // Seconds between random floor weapon spawns (e.g. 3.5)
+  maxFloorWeapons: number;          // Max active floor pickups at once (e.g. 6)
+}
+
+export const DEFAULT_BATTLER_CONFIG: BattlerConfig = {
+  subMode: 'ffa',
+  defaultHp: 100,
+  bossTeamId: 'red',
+  bossHpMultiplier: 4,
+  randomWeaponSpawn: true,
+  weaponSpawnInterval: 3.5,
+  maxFloorWeapons: 6,
+};
+
 export interface TeamConfig {
   id: string;
   name: string;
@@ -11,17 +37,19 @@ export interface TeamConfig {
   elasticity: number;  // Bounce bounciness factor (default 1.0)
   shape?: 'square' | 'rounded' | 'circle';
   enabled?: boolean;   // Whether player selected this racer for the race
+  maxHp?: number;      // Default 100 HP
+  battleAlliance?: 'A' | 'B'; // Squad assignment in Team Battle mode
 }
 
 export const DEFAULT_TEAMS: TeamConfig[] = [
-  { id: 'cyan',    name: 'CYAN',    hex: 0x22d3ee, css: '#22d3ee', speed: 3.25, elasticity: 1.0 },
-  { id: 'red',     name: 'RED',     hex: 0xff1e1e, css: '#ff1e1e', speed: 3.25, elasticity: 1.0 },
-  { id: 'yellow',  name: 'YELLOW',  hex: 0xfacc15, css: '#facc15', speed: 3.25, elasticity: 1.0 },
-  { id: 'green',   name: 'GREEN',   hex: 0x22c55e, css: '#22c55e', speed: 3.25, elasticity: 1.0 },
-  { id: 'magenta', name: 'PINK',    hex: 0xff1493, css: '#ff1493', speed: 3.25, elasticity: 1.0 },
-  { id: 'blue',    name: 'BLUE',    hex: 0x1d4ed8, css: '#1d4ed8', speed: 3.25, elasticity: 1.0 },
-  { id: 'orange',  name: 'ORANGE',  hex: 0xf97316, css: '#f97316', speed: 3.25, elasticity: 1.0 },
-  { id: 'purple',  name: 'PURPLE',  hex: 0x9333ea, css: '#9333ea', speed: 3.25, elasticity: 1.0 }
+  { id: 'cyan',    name: 'CYAN',    hex: 0x22d3ee, css: '#22d3ee', speed: 3.25, elasticity: 1.0, maxHp: 100, battleAlliance: 'A' },
+  { id: 'red',     name: 'RED',     hex: 0xff1e1e, css: '#ff1e1e', speed: 3.25, elasticity: 1.0, maxHp: 100, battleAlliance: 'B' },
+  { id: 'yellow',  name: 'YELLOW',  hex: 0xfacc15, css: '#facc15', speed: 3.25, elasticity: 1.0, maxHp: 100, battleAlliance: 'A' },
+  { id: 'green',   name: 'GREEN',   hex: 0x22c55e, css: '#22c55e', speed: 3.25, elasticity: 1.0, maxHp: 100, battleAlliance: 'B' },
+  { id: 'magenta', name: 'PINK',    hex: 0xff1493, css: '#ff1493', speed: 3.25, elasticity: 1.0, maxHp: 100, battleAlliance: 'A' },
+  { id: 'blue',    name: 'BLUE',    hex: 0x1d4ed8, css: '#1d4ed8', speed: 3.25, elasticity: 1.0, maxHp: 100, battleAlliance: 'B' },
+  { id: 'orange',  name: 'ORANGE',  hex: 0xf97316, css: '#f97316', speed: 3.25, elasticity: 1.0, maxHp: 100, battleAlliance: 'A' },
+  { id: 'purple',  name: 'PURPLE',  hex: 0x9333ea, css: '#9333ea', speed: 3.25, elasticity: 1.0, maxHp: 100, battleAlliance: 'B' }
 ];
 
 export type MovingWallDirection = 'up' | 'down' | 'left' | 'right';
@@ -31,6 +59,7 @@ export interface CorridorRect {
   y: number;
   w: number;
   h: number;
+  shape?: 'rect' | 'circle';            // Rectangular corridor or circular battleground room
   rotation?: number;                    // Optional rotation angle in degrees (e.g. for finishZone: 0, 90, 180, 270, etc.)
   hasMovingWall?: boolean;              // Whether this corridor has an active moving wall
   wallDirection?: MovingWallDirection;  // Direction the wall travels inside this corridor
@@ -85,7 +114,7 @@ export interface BaySpawn {
   teamId?: string;
 }
 
-export type WallTriggerMode = 'gate_destroy' | 'immediate' | 'timer';
+export type WallTriggerMode = 'gate_destroy' | 'immediate' | 'timer' | 'off';
 
 export type CameraType = 'auto_moving' | 'selected_racer' | 'manual';
 
@@ -168,6 +197,9 @@ export const DEFAULT_LAYOUT_CONFIG: SimulationLayoutConfig = {
 export interface MapData {
   id: string;
   name: string;
+  trackType?: TrackType;            // 'races' (default) | 'battler'
+  hideFinishZone?: boolean;         // True when finish zone is disabled (e.g. Battleground)
+  battlerConfig?: BattlerConfig;    // Battler survival / weapon spawn / sub-mode configuration
   corridors: CorridorRect[];
   finishZone: CorridorRect;
   baySpawns: BaySpawn[];
@@ -175,7 +207,7 @@ export interface MapData {
   pickups: PickupConfig[];
   waypoints: Waypoint[];
   barriers?: BarrierConfig[]; // Static and moving barriers with varied trajectories
-  wallTriggerMode?: WallTriggerMode; // How moving wall is triggered: 'gate_destroy' (default) | 'immediate' | 'timer'
+  wallTriggerMode?: WallTriggerMode; // How moving wall is triggered: 'gate_destroy' (default) | 'immediate' | 'timer' | 'off'
   wallTriggerTimer?: number;        // Countdown seconds if mode is 'timer' (e.g. 5s)
   cameraConfig?: CameraConfig;      // In-game camera configuration
   layoutConfig?: SimulationLayoutConfig; // Simulation Scene layout & viewport configuration
@@ -186,6 +218,13 @@ export interface TeamLiveStats {
   maxProgress: number;
   anyAlive: boolean;
   aliveCount: number;
+  hp: number;
+  maxHp: number;
+  weapon?: WeaponType | null;
+  weaponAmmo?: number;
+  weaponMaxAmmo?: number;
+  kills?: number;
+  battleAlliance?: 'A' | 'B' | 'boss';
 }
 
 

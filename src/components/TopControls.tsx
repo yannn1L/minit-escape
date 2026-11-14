@@ -78,7 +78,7 @@ export const TopControls: React.FC<TopControlsProps> = ({
           <option value="double_helix">Map 2: Twin Chute Chaos</option>
           <option value="arena_gauntlet">Map 3: Zig-Zag Gauntlet</option>
           {simulation.currentMapKey.startsWith('custom_') && (
-            <option value={simulation.currentMapKey}>★ Custom User Map</option>
+            <option value={simulation.currentMapKey}>Custom User Map</option>
           )}
         </select>
       </div>

@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import type { MapData, CorridorRect, GateConfig, PickupConfig } from '../../types/game';
 import { MAP_CLASSIC_SERPENTINE } from '../../core/registry/MapRegistry';
-import { X, Play, Plus, Trash2, Download, Upload } from 'lucide-react';
+import { X, Play, Plus, Trash2, Download, Upload, Wrench } from 'lucide-react';
 
 interface MapEditorModalProps {
   isOpen: boolean;
@@ -94,8 +94,9 @@ export const MapEditorModal: React.FC<MapEditorModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b-2 border-slate-900">
           <div className="flex items-center gap-2">
+            <Wrench className="w-5 h-5 text-slate-800" />
             <span className="text-base sm:text-lg font-black text-slate-900">
-              🛠️ Track Builder & Map Editor
+              Track Builder & Map Editor
             </span>
           </div>
           <button

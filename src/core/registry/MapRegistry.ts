@@ -212,8 +212,180 @@ export const MAP_ARENA_GAUNTLET: MapData = {
   ]
 };
 
+/**
+ * MAP 4: BATTLEGROUND DOME
+ * Circular rooms without a finish line. Whoever survives until the end wins!
+ * Weapons (Uzi, UMP, AK, Mini 14, SCAR) spawn randomly across the floor.
+ */
+export const MAP_BATTLEGROUND: MapData = {
+  id: 'battleground_dome',
+  name: 'Battleground Dome',
+  trackType: 'battler',
+  hideFinishZone: true,
+  wallTriggerMode: 'off',
+  battlerConfig: {
+    subMode: 'ffa',
+    defaultHp: 100,
+    bossTeamId: 'red',
+    bossHpMultiplier: 4,
+    randomWeaponSpawn: true,
+    weaponSpawnInterval: 3.0,
+    maxFloorWeapons: 7,
+  },
+  cameraConfig: {
+    type: 'selected_racer',
+    defaultZoom: 0.9,
+    minZoom: 0.4,
+    maxZoom: 2.5,
+    smoothSpeed: 4.0,
+    targetRacerId: 'leader',
+    predictNextOrderAt: 75,
+  },
+  corridors: [
+    // Central Grand Circular Arena
+    { x: 90,  y: 210, w: 320, h: 320, shape: 'circle' },
+    // North Circular Chamber
+    { x: 145, y: 65,  w: 210, h: 210, shape: 'circle' },
+    // South Circular Chamber
+    { x: 145, y: 465, w: 210, h: 210, shape: 'circle' },
+    // West Circular Wing
+    { x: 15,  y: 280, w: 180, h: 180, shape: 'circle' },
+    // East Circular Wing
+    { x: 305, y: 280, w: 180, h: 180, shape: 'circle' },
+  ],
+  finishZone: { x: 220, y: 20, w: 60, h: 50, rotation: 0 },
+  baySpawns: [
+    { x: 250, y: 150, vx: 2.8,  vy: 2.4,  teamId: 'cyan' },
+    { x: 345, y: 265, vx: -2.9, vy: 2.2,  teamId: 'red' },
+    { x: 390, y: 370, vx: -3.1, vy: -1.9, teamId: 'yellow' },
+    { x: 345, y: 475, vx: -2.6, vy: -2.5, teamId: 'green' },
+    { x: 250, y: 580, vx: -2.8, vy: -2.4, teamId: 'magenta' },
+    { x: 155, y: 475, vx: 2.7,  vy: -2.3, teamId: 'blue' },
+    { x: 110, y: 370, vx: 3.1,  vy: 1.9,  teamId: 'orange' },
+    { x: 155, y: 265, vx: 2.8,  vy: 2.3,  teamId: 'purple' },
+  ],
+  gates: [],
+  barriers: [
+    { id: 'bg_pillar_n', x: 230, y: 285, w: 40, h: 16, movement: 'horizontal', speed: 45, distance: 35, color: 0xf59e0b },
+    { id: 'bg_pillar_s', x: 230, y: 440, w: 40, h: 16, movement: 'horizontal', speed: 45, distance: 35, color: 0xf59e0b },
+  ],
+  pickups: [
+    { type: 'uzi',    x: 250, y: 135 },
+    { type: 'ump',    x: 95,  y: 370 },
+    { type: 'ak',     x: 250, y: 370 },
+    { type: 'mini14', x: 405, y: 370 },
+    { type: 'scar',   x: 250, y: 600 },
+    { type: 'shield', x: 190, y: 370 },
+  ],
+  waypoints: [
+    { x: 250, y: 370 },
+    { x: 250, y: 150 },
+  ],
+};
+
+export function createEmptyCircuit(mode: 'races' | 'battler' = 'races'): MapData {
+  if (mode === 'battler') {
+    return {
+      id: `empty_battler_${Date.now()}`,
+      name: 'New Battleground',
+      trackType: 'battler',
+      hideFinishZone: true,
+      wallTriggerMode: 'off',
+      battlerConfig: {
+        subMode: 'ffa',
+        defaultHp: 100,
+        bossTeamId: 'red',
+        bossHpMultiplier: 4,
+        randomWeaponSpawn: true,
+        weaponSpawnInterval: 3.5,
+        maxFloorWeapons: 6,
+      },
+      cameraConfig: {
+        type: 'manual',
+        defaultZoom: 1.0,
+        minZoom: 0.4,
+        maxZoom: 2.5,
+        smoothSpeed: 4.5,
+        targetRacerId: 'leader',
+        predictNextOrderAt: 75,
+      },
+      corridors: [
+        { x: 110, y: 230, w: 280, h: 280, shape: 'circle' },
+      ],
+      finishZone: { x: 220, y: 30, w: 60, h: 55, rotation: 0 },
+      baySpawns: [
+        { x: 210, y: 310, vx: 3.0,  vy: -2.0, teamId: 'cyan' },
+        { x: 290, y: 310, vx: -3.0, vy: 2.0,  teamId: 'red' },
+        { x: 310, y: 370, vx: -2.8, vy: -2.2, teamId: 'yellow' },
+        { x: 290, y: 430, vx: -3.0, vy: -2.0, teamId: 'green' },
+        { x: 210, y: 430, vx: 3.0,  vy: -2.0, teamId: 'magenta' },
+        { x: 190, y: 370, vx: 2.8,  vy: 2.2,  teamId: 'blue' },
+        { x: 250, y: 295, vx: 2.5,  vy: 2.5,  teamId: 'orange' },
+        { x: 250, y: 445, vx: -2.5, vy: -2.5, teamId: 'purple' },
+      ],
+      gates: [],
+      barriers: [],
+      pickups: [],
+      waypoints: [
+        { x: 250, y: 370 },
+        { x: 250, y: 300 },
+      ],
+    };
+  }
+
+  return {
+    id: `empty_race_${Date.now()}`,
+    name: 'New Empty Circuit',
+    trackType: 'races',
+    hideFinishZone: false,
+    wallTriggerMode: 'gate_destroy',
+    wallTriggerTimer: 5,
+    battlerConfig: {
+      subMode: 'ffa',
+      defaultHp: 100,
+      bossTeamId: 'red',
+      bossHpMultiplier: 4,
+      randomWeaponSpawn: false,
+      weaponSpawnInterval: 4.0,
+      maxFloorWeapons: 5,
+    },
+    cameraConfig: {
+      type: 'manual',
+      defaultZoom: 1.0,
+      minZoom: 0.4,
+      maxZoom: 2.5,
+      smoothSpeed: 4.5,
+      targetRacerId: 'leader',
+      predictNextOrderAt: 75,
+    },
+    corridors: [
+      { x: 160, y: 300, w: 180, h: 220, shape: 'rect' },
+    ],
+    finishZone: { x: 220, y: 305, w: 60, h: 55, rotation: 0 },
+    baySpawns: [
+      { x: 200, y: 450, vx: 3.0,  vy: -2.0, teamId: 'cyan' },
+      { x: 230, y: 450, vx: -3.0, vy: -2.0, teamId: 'red' },
+      { x: 260, y: 450, vx: 3.0,  vy: -2.0, teamId: 'yellow' },
+      { x: 290, y: 450, vx: -3.0, vy: -2.0, teamId: 'green' },
+      { x: 200, y: 485, vx: 2.8,  vy: -2.2, teamId: 'magenta' },
+      { x: 230, y: 485, vx: -2.8, vy: -2.2, teamId: 'blue' },
+      { x: 260, y: 485, vx: 2.8,  vy: -2.2, teamId: 'orange' },
+      { x: 290, y: 485, vx: -2.8, vy: -2.2, teamId: 'purple' },
+    ],
+    gates: [],
+    barriers: [],
+    pickups: [],
+    waypoints: [
+      { x: 250, y: 480 },
+      { x: 250, y: 330 },
+    ],
+  };
+}
+
 // Register default maps
 GlobalRegistry.register('map', 'classic_serpentine', MAP_CLASSIC_SERPENTINE);
 GlobalRegistry.register('map', 'double_helix', MAP_DOUBLE_HELIX);
 GlobalRegistry.register('map', 'arena_gauntlet', MAP_ARENA_GAUNTLET);
+GlobalRegistry.register('map', 'battleground_dome', MAP_BATTLEGROUND);
+
 
